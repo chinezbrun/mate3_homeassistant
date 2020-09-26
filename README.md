@@ -2,3 +2,4 @@
  OutBackPower Mate3 integration with Home Assistant
 
 ![Home Assistant](/docs/ha.png)
+Format: ![Alt Text](url)
