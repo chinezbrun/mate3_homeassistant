@@ -11,7 +11,7 @@ This integration is based on ReadMateStatusModBus.py (RMS) output.
 # ReadMateStatusModBus.py
 - Query MATE3/MATE3S and gets data, format, register in the database (optional) and returns a json file that is used for display current status. As of version 0.5.1 MQTT is implemented to further integration with Home Assistant.
 - ReadMateStatusModBus.py script is running once every X minute -- task should be created (windows or Linux)
-- ReadMateStatusModBus.cfg is the config file for this script
+- ReadMateStatusModBus.cfg is the config file for this script -- should be configured based on your needs
 - same script is used also in https://github.com/chinezbrun/MonitorMate_ModBus
 
 ReadMateStatusModBus.sh (is not mandatory)
