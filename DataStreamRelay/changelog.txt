@@ -1,0 +1,24 @@
+# this script read Mate3 data write values in MariaDB
+# output JSON file with all info
+
+versions history:
+=====================================
+0.1.0_20190505 - first release
+0.2.0_20190507 - moved variables up, introduced error treatment subroutine, 
+		 correct list ->wrong display of Operating Mode FXR
+0.2.1_20190511 - introduce error and warning mode , JSON file is now complete
+0.2.2_20190514 - correct error of double FNDC display in JSON
+0.2.3_20190514 - design changes
+0.3.0_20190531 - save datatime direct to SQL table - date field in SQL table should be set from "current timestamp" to "none" 
+0.3.1_20190606 - update links inside
+0.4.0_20190608 - moved variables in config.txt 
+0.4.1_20190618 - bug correction aux mod FXR
+0.4.2_20190723 - small design updates on error reporting
+0.4.3_20191101 - change the error file name to general_info 
+0.4.4_20191231 - errors flag not displayed correct for FM60/80.this is fixed now
+0.5.0_20190307 - add MQTT for Home Automation integration (Bat, SOC,AC, Operational Mode)
+                 add option for second path for JSON file (potential use in Home Automation)
+                 ReadMateStaus.cfg updated
+0.5.1_20190401 - more MQTT parameter added for Home Automation integration, smmal bug fixes
+0.5.2_20200522 - changes in grid_input_mode list - removes blanks
+0.5.3_20200903 - more MQTT parameter added for Home Automation integration

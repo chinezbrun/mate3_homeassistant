@@ -1,2 +1,2 @@
-# mate3_homeassistant
- Integrates OutbackMate3 with HA
+# Mate3_HomeAssitant
+ OutBackPower Mate3 integration with Home Assistant
