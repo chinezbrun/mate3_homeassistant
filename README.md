@@ -19,14 +19,15 @@ ReadMateStatusModBus.sh (is not mandatory)
 This is an example of InitScript for ReadMateStatusModBus.py in LINUX. This script should run with minimum one minute frequency .
 See your specific OS/distributions documentation for setting up daemons/tasks.
 
-Home Assistant configuration
-===========
-There are two possibilities to integrate
-1 MQTT               - predefined parameters (more can be added by request)
-2 JSON file decoding - access to all parameters
+# Home Assistant configuration
+A new folder "data" should be created in "www" folder located in home-assistant (ex: \home-assistant\www\data). In this folder, JSON file will be saved by RMS.
 
-MQTT
+Integration variants:
+1. MQTT - predefined parameters (more can be added by request)
+2. JSON file decoding - access to all parameters
+
 sensors should be defined in configuration.yaml
+1. variant MQTT - add below sensors:
 ~~~
 sensor:
   - platform: mqtt
@@ -101,11 +102,12 @@ sensor:
         friendly_name: "solar_used_watts"
         unit_of_measurement: 'W'
         value_template: "{{(states('sensor.solar_bat_voltage')|int) * (-1) * (states('sensor.solar_used_amp')|int)}}"
+~~~
+
+2. variant JSON decoding - add sensors like as per your needs, bellow are some examples:
 
 ~~~
-For JSON decoding sensors should be defined like in below example:
-~~~
-# file platform
+sensor:
   - platform: file
     name: solar_ac_input_file
     file_path: /config/www/data/status.json
@@ -115,5 +117,5 @@ For JSON decoding sensors should be defined like in below example:
     name: solar_ac_output_file
     file_path: /config/www/data/status.json
     value_template: '{{ value_json.devices[0].ac_output_voltage }}'
-    unit_of_measurement: 'v' 
+    unit_of_measurement: 'v'
 ~~~
