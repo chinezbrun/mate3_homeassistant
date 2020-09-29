@@ -5,25 +5,25 @@
 
 #  How does this software work?
 This integration is based on ReadMateStatusModBus.py (RMS) output.
-- Once starts RMS creates a JSON file with almost all useful parameters extracted from Mate3 and send a MQTT command for integrated ones. More functionalities of RMS can be configured in config file - ReadMateStatusModBus.cfg.
+- RMS creates a JSON file with almost all useful parameters extracted from Mate3 and send MQTT data for integrated ones. More functionalities of RMS can be configured in config file - ReadMateStatusModBus.cfg.
 - HA needs to be configured to receive MQTT or to decode the JSON file
 
 # ReadMateStatusModBus.py
-- Query MATE3/MATE3S and gets data, format, register in the database (optional) and returns a json file that is used for display current status. As of version 0.5.1 MQTT is implemented to further integration with Home Assistant.
-- ReadMateStatusModBus.py script is running once every X minute -- task should be created (windows or Linux)
+- Query MATE3/MATE3S, gets data, format, register in the database (optional), push MQTT data and returns a JSON file.
+- ReadMateStatusModBus.py script should run every X minute -- task should be created (windows or Linux)
 - ReadMateStatusModBus.cfg is the config file for this script -- should be configured based on your needs
 - same script is used also in https://github.com/chinezbrun/MonitorMate_ModBus
 
 ReadMateStatusModBus.sh (is not mandatory)
 ===========
-This is an example of InitScript for ReadMateStatusModBus.py in LINUX. This script should run with minimum one minute frequency .
+Example of LINUX script that can be used to start ReadMateStatusModBus.py. The script should run with desire update frequency (ex. every minute)
 See your specific OS/distributions documentation for setting up daemons/tasks.
 
 # Home Assistant configuration
-A new folder "data" should be created in "www" folder located in home-assistant (ex: \home-assistant\www\data). In this folder, JSON file will be saved by RMS.
+A new folder "data" should be created in "www" folder located in home-assistant (where the ex: \home-assistant\www\data). In this folder, the JSON file will be saved by RMS.
 
 Integration variants:
-1. MQTT - predefined parameters (more can be added by request)
+1. MQTT - predefined parameters
 2. JSON file decoding - access to all parameters
 
 sensors should be defined in configuration.yaml
