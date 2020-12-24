@@ -33,7 +33,7 @@ sensor:
   - platform: mqtt
     name: "solar_ac_input"
     state_topic: "home-assistant/solar/solar_ac_input"
-    unit_of_measurement: "V"
+    unit_of_measurement: "V" 
   - platform: mqtt
     name: "solar_ac_output"
     state_topic: "home-assistant/solar/solar_ac_output"
@@ -84,9 +84,14 @@ sensor:
     state_topic: "home-assistant/solar/solar_used_amp"
     unit_of_measurement: "A"  
   - platform: mqtt
+    name: "solar_since_charge_met"
+    state_topic: "home-assistant/solar/solar_since_charge_met"
+    unit_of_measurement: "days" 
+    value_template: '{{value | round(2)}}'
+  - platform: mqtt
     name: "solar_charge_met"
     state_topic: "home-assistant/solar/solar_charge_met"
-    unit_of_measurement: "days"
+    unit_of_measurement: "" 
   - platform: mqtt
     name: "solar_power_diversion_uptime"
     state_topic: "home-assistant/solar/power_diversion_uptime"
