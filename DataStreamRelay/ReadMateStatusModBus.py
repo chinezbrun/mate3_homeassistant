@@ -12,7 +12,7 @@ import paho.mqtt.publish as publish
 import shutil  
 import sys, os
 
-script_ver = "0.5.3_20200903"
+script_ver = "0.5.5_20201220"
 print ("script version: "+ script_ver)
 
 pathname          = os.path.dirname(sys.argv[0])        
@@ -440,8 +440,8 @@ while True:
                 GSconfig_Charger_Operating_Mode = int(response.registers[0])
                 logging.info(".... FXR Charger Mode " + str(GSconfig_Charger_Operating_Mode))
                 charger_mode='None'
-                if GSconfig_Charger_Operating_Mode == 0:   charger_mode ='OFF'
-                if GSconfig_Charger_Operating_Mode == 1:   charger_mode ='ON'
+                if GSconfig_Charger_Operating_Mode == 0:   charger_mode ='Off'
+                if GSconfig_Charger_Operating_Mode == 1:   charger_mode ='On'
                 
                 if MQTT_active=='true' and device_list[port]=='VFXR3048_master':
                     publish.single('home-assistant/solar/solar_grid_input_mode', grid_input_mode, hostname=MQTT_broker)
@@ -834,8 +834,8 @@ while True:
                     publish.single('home-assistant/solar/solar_bat_temp', fn_battery_temperature, hostname=MQTT_broker)
                     publish.single('home-assistant/solar/solar_divert_amp', fn_shunt_c_current, hostname=MQTT_broker)
                     publish.single('home-assistant/solar/solar_used_amp', fn_shunt_b_current, hostname=MQTT_broker)
-                    publish.single('home-assistant/solar/solar_charge_met', FN_Days_Since_Charge_Parameters_Met, hostname=MQTT_broker)
-                    
+                    publish.single('home-assistant/solar/solar_charge_met', charge_params_met, hostname=MQTT_broker)
+                    publish.single('home-assistant/solar/solar_since_charge_met', FN_Days_Since_Charge_Parameters_Met, hostname=MQTT_broker)
         except:
             ErrorPrint("Error: RMS - in port " + str(port) + " FNDC module")
 
