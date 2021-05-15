@@ -7,17 +7,16 @@ from pymodbus.client.sync import ModbusTcpClient as ModbusClient
 from pymodbus.constants import Endian
 from pymodbus.payload import BinaryPayloadDecoder
 from configparser import ConfigParser
-import paho.mqtt.client as mqtt
 import paho.mqtt.publish as publish
 import shutil  
 import sys, os
 
-script_ver = "0.5.5_20201220"
+script_ver = "0.6.0_20210121"
 print ("script version: "+ script_ver)
 
 pathname          = os.path.dirname(sys.argv[0])        
 fullpathname      = os.path.abspath(pathname)+'/ReadMateStatusModBus.cfg' 
-print('full path =', fullpathname)
+print("full path:               ", fullpathname)
 
 config            = ConfigParser()
 config.read(fullpathname)
@@ -34,33 +33,37 @@ db_port           = config.get('Maria DB connection', 'db_port')
 user              = config.get('Maria DB connection', 'user')
 password          = config.get('Maria DB connection', 'password')
 database          = config.get('Maria DB connection', 'database')
-ServerPath        = config.get('WebServer path', 'ServerPath')
-DuplicateSave     = config.get('WebServer path', 'DuplicateSave')
-DuplicatePath     = config.get('WebServer path', 'DuplicatePath')
+output_path       = config.get('Path', 'output_path')
+duplicate_active  = config.get('Path', 'duplicate_active')
+duplicate_path    = config.get('Path', 'duplicate_path')
 MQTT_active       = config.get('MQTT', 'MQTT_active')
 MQTT_broker       = config.get('MQTT', 'MQTT_broker')
+debug             = config.get('General', 'debug')
 
-print("SQL active: " ,SQL_active)
-print("port:       ", db_port)
-print("MQTT active:",MQTT_active)
+print("output location:         ", output_path)
+print("duplicate output active: ", duplicate_active)
+print("SQL active  :            ", SQL_active)
+print("MQTT active :            ", MQTT_active)
+print("debug active:            ", debug)
 
 # Setup logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s', datefmt='%Y%m%d %H:%M:%S')
+if debug == "true":
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s', datefmt='%Y%m%d %H:%M:%S')
 logging.getLogger(__name__)
 
-now=datetime.now()
+now              = datetime.now()
 date_str         = now.strftime("%Y-%m-%dT%H:%M:%S")
 date_sql         = datetime.now().replace(second=0, microsecond=0)
 
-device_list=[          # used in main loop      
-    "VFXR3048_master", #port 1   used fot MQTT data
+device_list=[          #used in main loop      
+    "VFXR3048_master", #port 1   used for MQTT data
     "VFXR3048_slave",  #port 2
     "FM60",            #port 3
     "FM80",            #port 4
     "FNDC"             #port 5   used for MQTT data
     ]
 
-shunt_list=[            # used in main loop
+shunt_list=[           # used in main loop
     "Solar",           # Shunt A
     "Invertor",        # Shunt B
     "Diverter",        # Shunt C
@@ -174,7 +177,6 @@ def getSunSpec(basereg):
     except:
         return None
     blocksize = int(register.registers[0])
-    #print(blocksize) # DPO debug
     return blocksize
 
 def getBlock(basereg):
@@ -193,7 +195,6 @@ def getBlock(basereg):
     blockname = None
     try:
         blockname = mate3_did[blockID]
-        # print "Detected a " + mate3_did[blockID] + " at " + str(basereg) + " with size " + str(blocksize)
     except:
         print("ERROR: Unknown device type with DID=" + str(blockID))
     return {"size": blocksize, "DID": blockname}
@@ -201,34 +202,32 @@ def getBlock(basereg):
 #error log subroutine
 def ErrorPrint (str) :
     try:
-        with open(ServerPath + "/data/general_info.log","r") as file:
+        with open(output_path + "/data/general_info.log","r") as file:
             save = file.read()
-        with open(ServerPath + "/data/general_info.log","w") as file:
-            file = open(ServerPath + "/data/general_info.log","a")
+        with open(output_path + "/data/general_info.log","w") as file:
+            file = open(output_path + "/data/general_info.log","a")
             file.write(now.strftime("%d/%m/%Y %H:%M:%S "))
-            #file.write(str + "\r\n")
             file.write(str + "\n")
             print(str)
-        with open(ServerPath + "/data/general_info.log","a") as file:
+        with open(output_path + "/data/general_info.log","a") as file:
             file.write(save)
         return
     except OSError:
         print(str,"Error: RMS - Errorhandling block: double error")
 
-print("------------------------------------------------")
-print(" MATE3 ModBus Interface")
-print("------------------------------------------------")
-
+#------------------------------------------------
+#  Start MATE3 ModBus Interface
+#------------------------------------------------
 # Try to build the mate3 MODBUS connection
 logging.info("Building MATE3 MODBUS connection")
+start_run  = datetime.now() # used only for runtime calculation
+
 # Mate3 connection
 try:
     client = ModbusClient(mate3_ip, mate3_modbus)
     logging.info(".. Make sure we are indeed connected to an Outback power system")
     reg    = sunspec_start_reg
     size   = getSunSpec(reg)
-    #print(reg) #DPO debug
-    #print(size) #DPO debug
     if size is None:
         logging.info("We have failed to detect an Outback system. Exciting")
         exit()
@@ -242,23 +241,24 @@ logging.info(".. Connected OK to an Outback system")
 #This is the main loop
 #--------------------------------------------------------------
 
+devices           = []                           # used for JSON file - list of data for all devices
+various           = []                           # used for JSON file - different data not connected with MateMonitoring project
+db_devices_values = []                           # used for MariaDB upload - list of all data for all devices  
+db_devices_sql    = []                           # used for MariaDB upload - list of all data for all devices 
+mqtt_devices      = []                           # used for MQTT - list with topics and payloads 
+CC_total_watts    = 0                            # used for MQTT to sum the total pv power from charge controlers
+
 startReg = reg + size + 4
 while True:
     time={                                         # used for JSON file - servertime now
     "relay_local_time": date_str,
     "mate_local_time": date_str,
     "server_local_time": date_str}
-    
-    devices = []                                     # used for JSON file - list of data for all devices
-    various = []                                     # used for JSON file - different data not connected with MateMonitoring project
-    CC_total_watts = 0                               # used for MQTT to sum the total pv power from charge controlers
-    
+
     reg = startReg
     for block in range(0, 30):
-        #print ("Getting data from Register=" + str(reg) + " last size was " + str(size)) #DPO debug
         blockResult = getBlock(reg)
-        #print("block:"+str(block), "Registry:" + str(reg), getBlock(reg)) #DPO debug
-
+        
         try:        
             if "Single Phase Radian Inverter Real Time Block" in blockResult['DID']:
                 logging.info(".. Detected a Single Phase Radian Inverter Real Time Block" + " -Registry:"+str(reg))
@@ -391,39 +391,30 @@ while True:
                   ],
                   "label":device_list[port]}
                 devices.append(devices_array)     # append FXR data to devices
-
-                # Upload FXR data to SQL database
-                if SQL_active=='true':
-                    mydb = mariadb.connect(host=host,port=db_port,user=user,password=password,database=database)
-                    mycursor = mydb.cursor()
-                    
-                    val=(date_sql,address,5,gs_single_inverter_output_current,gs_single_inverter_charge_current,gs_single_inverter_buy_current,
-                         gs_single_ac_input_voltage,gs_single_output_ac_voltage,GS_Single_Inverter_Sell_Current,operating_modes,
-                         error_flags,ac_use,gs_single_battery_voltage,aux_relay,warning_flags)
-                    sql="INSERT INTO monitormate_fx \
-                    (date,address,device_id,inverter_current,charge_current,buy_current,ac_input_voltage,ac_output_voltage,\
-                    sell_current,operational_mode,error_modes,ac_mode,battery_voltage,misc,warning_modes) \
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
-
-                    mycursor.execute(sql, val)
-                    mydb.commit()
-
-                    mycursor.close()
-                    mydb.close()
-                    logging.info(".. FXR Data recorded succesfull " )
+              
+                # FXR data - MariaDB SQL preparation
+                db_devices_values.append ((date_sql,address,5,gs_single_inverter_output_current,gs_single_inverter_charge_current,gs_single_inverter_buy_current,
+                gs_single_ac_input_voltage,gs_single_output_ac_voltage,GS_Single_Inverter_Sell_Current,operating_modes,
+                error_flags,ac_use,gs_single_battery_voltage,aux_relay,warning_flags))
                 
-                # send data via MQTT    
-                if MQTT_active=='true' and device_list[port]=='VFXR3048_master' :
-                    publish.single('home-assistant/solar/solar_ac_input', gs_single_ac_input_voltage, hostname=MQTT_broker)
-                    publish.single('home-assistant/solar/solar_ac_output', gs_single_output_ac_voltage, hostname=MQTT_broker)
-                    publish.single('home-assistant/solar/solar_ac_mode', ac_use, hostname=MQTT_broker)
-                    publish.single('home-assistant/solar/solar_operational_mode', operating_modes, hostname=MQTT_broker)
-                                        
-        except:            
-            ErrorPrint("Error: RMS - in port " + str(port) + " FXR module")
+                db_devices_sql.append ("INSERT INTO monitormate_fx \
+                (date,address,device_id,inverter_current,charge_current,buy_current,ac_input_voltage,ac_output_voltage,\
+                sell_current,operational_mode,error_modes,ac_mode,battery_voltage,misc,warning_modes) \
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)")
+
+                # FXR data - MQTT preparation   
+                if device_list[port]=='VFXR3048_master' :                     # master invertor 
+                    mqtt_devices.append(
+                                {'home-assistant/solar/solar_ac_input'        :gs_single_ac_input_voltage,
+                                 'home-assistant/solar/solar_ac_output'       :gs_single_output_ac_voltage,
+                                 'home-assistant/solar/solar_ac_mode'         :ac_use,
+                                 'home-assistant/solar/solar_operational_mode':operating_modes})
+      
+        except Exception as e:
+            ErrorPrint("Error: RMS - port: " + str(port) + " FXR module " + str(e))
+        
         try:
             if "Radian Inverter Configuration Block" in blockResult['DID']:
-                
                 response = client.read_holding_registers(reg + 26, 1)
                 GSconfig_Grid_Input_Mode = int(response.registers[0])
                 logging.info(".... FXR Grid input Mode " + str(GSconfig_Grid_Input_Mode))
@@ -442,11 +433,7 @@ while True:
                 charger_mode='None'
                 if GSconfig_Charger_Operating_Mode == 0:   charger_mode ='Off'
                 if GSconfig_Charger_Operating_Mode == 1:   charger_mode ='On'
-                
-                if MQTT_active=='true' and device_list[port]=='VFXR3048_master':
-                    publish.single('home-assistant/solar/solar_grid_input_mode', grid_input_mode, hostname=MQTT_broker)
-                    publish.single('home-assistant/solar/solar_charger_mode', charger_mode, hostname=MQTT_broker)
-                    
+
                 # FXR dataconfig - JSON preparation
                 various_array={
                   "address": address,
@@ -455,10 +442,16 @@ while True:
                   "charger_mode": charger_mode
                   }
                 various.append(various_array)     # append FXR data to devices
-        
-        except:
-            ErrorPrint("Error: RMS - in port " + str(port) + " FXR config block")
-        
+                
+                # FXR dataconfig - Mqtt preparation
+                if device_list[port]=='VFXR3048_master':
+                    mqtt_devices.append(
+                        {'home-assistant/solar/solar_grid_input_mode':grid_input_mode,
+                         'home-assistant/solar/solar_charger_mode':charger_mode})
+     
+        except Exception as e:
+            ErrorPrint("Error: RMS - port: " + str(port) + " FXR config block " + str(e))
+
         try:
             if "Charge Controller Block" in blockResult['DID']:
                 logging.info(".. Detected a Charge Controller Block")
@@ -534,9 +527,6 @@ while True:
                 if CCconfig_Faults == 32:  error_flags='Shorted Battery Temp Sensor'
                 if CCconfig_Faults == 64:  error_flags='Over Temp'               
                 if CCconfig_Faults == 128: error_flags='High VOC'
-                
-                if MQTT_active=='true' and device_list[port]=='FM80':
-                    publish.single('home-assistant/solar/solar_charge_mode', cc_mode, hostname=MQTT_broker)              
 
                 # Controlers data - JSON preparation
                 devices_array= {
@@ -558,25 +548,18 @@ while True:
                     }
                 devices.append(devices_array)
 
-                # Upload Controlers data to SQL database
-             
-                if SQL_active=='true':
-                    mydb = mariadb.connect(host=host,port=db_port,user=user,password=password,database=database)
-                    mycursor = mydb.cursor()
-                    
-                    val=(date_sql,address,3,cc_batt_current,cc_array_current,cc_array_voltage,CC_Todays_KW,aux_mode,aux_state,error_flags,cc_mode,cc_batt_voltage,CC_Todays_AH)
-                    sql="INSERT INTO monitormate_cc \
-                    (date,address,device_id,charge_current,pv_current,pv_voltage,daily_kwh,aux_mode,aux,error_modes,charge_mode,battery_voltage,daily_ah) \
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
-         
-                    mycursor.execute(sql, val)
-                    mydb.commit()
-                    mycursor.close()
-                    mydb.close()
-                    logging.info(".. CC Data recorded succesfull " )
- 
-        except:
-            ErrorPrint("Error: RMS - in port " + str(port) + " CC module")
+                # Controlers data - MariaDB SQL preparation
+                db_devices_values.append((date_sql,address,3,cc_batt_current,cc_array_current,cc_array_voltage,CC_Todays_KW,aux_mode,aux_state,error_flags,cc_mode,cc_batt_voltage,CC_Todays_AH))
+                db_devices_sql.append ("INSERT INTO monitormate_cc \
+                (date,address,device_id,charge_current,pv_current,pv_voltage,daily_kwh,aux_mode,aux,error_modes,charge_mode,battery_voltage,daily_ah) \
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)")
+                
+                #controlers data - MQTT data preparation
+                if device_list[port]=='FM80':
+                    mqtt_devices.append({'home-assistant/solar/solar_charge_mode':cc_mode})                 
+        
+        except Exception as e:
+            ErrorPrint("Error: RMS - port: " + str(port) + " CC module " + str(e))
 
         try:
             if "FLEXnet-DC Real Time Block" in blockResult['DID']:
@@ -592,7 +575,6 @@ while True:
                 logging.info(".... FN Shunt A Current (A) " + str(fn_shunt_a_current))
                 
                 response = client.read_holding_registers(reg + 9, 1)
-               # fn_shunt_b_current = decode_int16(int(response.registers[0])) * 0.1
                 fn_shunt_b_current = round(decode_int16(response.registers[0]) * 0.1,2)
                 logging.info(".... FN Shunt B Current (A) " + str(fn_shunt_b_current))
                
@@ -754,158 +736,177 @@ while True:
                 }            
                 devices.append(devices_array)
                                 
-                # Upload FNDC data to SQL database
-                if SQL_active=='true':          
-                    mydb = mariadb.connect(host=host,port=db_port,user=user,password=password,database=database)
-                    mycursor = mydb.cursor()            
+                # FNDC data - MariaDB SQL preparation
+                db_devices_values.append ((
+                date_sql,
+                address,
+                4,
+                fn_shunt_a_current,
+                fn_shunt_b_current,
+                fn_shunt_c_current,
+                FN_Shunt_A_Accumulated_AH,
+                FN_Shunt_A_Accumulated_kWh,
+                FN_Shunt_B_Accumulated_AH,
+                FN_Shunt_B_Accumulated_kWh,
+                FN_Shunt_C_Accumulated_AH,
+                FN_Shunt_C_Accumulated_kWh,
+                FN_Days_Since_Charge_Parameters_Met,
+                FN_Todays_Minimum_SOC,
+                FN_Todays_NET_Input_AH,
+                FN_Todays_NET_Output_AH,
+                FN_Todays_NET_Input_kWh,
+                FN_Todays_NET_Output_kWh,
+                FN_Charge_Factor_Corrected_NET_Battery_AH,
+                FN_Charge_Factor_Corrected_NET_Battery_kWh,
+                charge_params_met,
+                relay_mode,
+                relay_status,
+                fn_battery_voltage,
+                fn_state_of_charge,
+                Shunt_A_Enabled,
+                Shunt_B_Enabled,
+                Shunt_C_Enabled,
+                fn_battery_temperature))
+                
+                db_devices_sql.append ("INSERT INTO monitormate_fndc (\
+                date,\
+                address,\
+                device_id,\
+                shunt_a_current,\
+                shunt_b_current,\
+                shunt_c_current,\
+                accumulated_ah_shunt_a,\
+                accumulated_kwh_shunt_a,\
+                accumulated_ah_shunt_b,\
+                accumulated_kwh_shunt_b,\
+                accumulated_ah_shunt_c,\
+                accumulated_kwh_shunt_c,\
+                days_since_full,\
+                today_min_soc,\
+                today_net_input_ah,\
+                today_net_output_ah,\
+                today_net_input_kwh,\
+                today_net_output_kwh,\
+                charge_factor_corrected_net_batt_ah,\
+                charge_factor_corrected_net_batt_kwh,\
+                charge_params_met,\
+                relay_mode,\
+                relay_status,\
+                battery_voltage,\
+                soc,\
+                shunt_enabled_a,\
+                shunt_enabled_b,\
+                shunt_enabled_c,\
+                battery_temp) \
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)")
+                    
+                # FNDC data - MQTT data preparation topic:value
+                mqtt_devices.append (
+                    {'home-assistant/solar/solar_bat_voltage':fn_battery_voltage,
+                     'home-assistant/solar/solar_soc':fn_state_of_charge,
+                     'home-assistant/solar/solar_bat_temp':fn_battery_temperature,
+                     'home-assistant/solar/solar_divert_amp':fn_shunt_c_current,
+                     'home-assistant/solar/solar_used_amp':fn_shunt_b_current,
+                     'home-assistant/solar/solar_charge_met':charge_params_met,
+                     'home-assistant/solar/solar_since_charge_met':FN_Days_Since_Charge_Parameters_Met})
 
-                    val=(
-                    date_sql,
-                    address,
-                    4,
-                    fn_shunt_a_current,
-                    fn_shunt_b_current,
-                    fn_shunt_c_current,
-                    FN_Shunt_A_Accumulated_AH,
-                    FN_Shunt_A_Accumulated_kWh,
-                    FN_Shunt_B_Accumulated_AH,
-                    FN_Shunt_B_Accumulated_kWh,
-                    FN_Shunt_C_Accumulated_AH,
-                    FN_Shunt_C_Accumulated_kWh,
-                    FN_Days_Since_Charge_Parameters_Met,
-                    FN_Todays_Minimum_SOC,
-                    FN_Todays_NET_Input_AH,
-                    FN_Todays_NET_Output_AH,
-                    FN_Todays_NET_Input_kWh,
-                    FN_Todays_NET_Output_kWh,
-                    FN_Charge_Factor_Corrected_NET_Battery_AH,
-                    FN_Charge_Factor_Corrected_NET_Battery_kWh,
-                    charge_params_met,
-                    relay_mode,
-                    relay_status,
-                    fn_battery_voltage,
-                    fn_state_of_charge,
-                    Shunt_A_Enabled,
-                    Shunt_B_Enabled,
-                    Shunt_C_Enabled,
-                    fn_battery_temperature)
-                    
-                    sql = "INSERT INTO monitormate_fndc (\
-                    date,\
-                    address,\
-                    device_id,\
-                    shunt_a_current,\
-                    shunt_b_current,\
-                    shunt_c_current,\
-                    accumulated_ah_shunt_a,\
-                    accumulated_kwh_shunt_a,\
-                    accumulated_ah_shunt_b,\
-                    accumulated_kwh_shunt_b,\
-                    accumulated_ah_shunt_c,\
-                    accumulated_kwh_shunt_c,\
-                    days_since_full,\
-                    today_min_soc,\
-                    today_net_input_ah,\
-                    today_net_output_ah,\
-                    today_net_input_kwh,\
-                    today_net_output_kwh,\
-                    charge_factor_corrected_net_batt_ah,\
-                    charge_factor_corrected_net_batt_kwh,\
-                    charge_params_met,\
-                    relay_mode,\
-                    relay_status,\
-                    battery_voltage,\
-                    soc,\
-                    shunt_enabled_a,\
-                    shunt_enabled_b,\
-                    shunt_enabled_c,\
-                    battery_temp) \
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
-                    
-                    mycursor.execute(sql, val)
-                    mycursor.close()
-                    mydb.close()
-                    logging.info(".. FNDC Data recorded succesfull " )
-                    
-                # send data via MQTT
-                if MQTT_active=='true':
-                    publish.single('home-assistant/solar/solar_bat_voltage', fn_battery_voltage, hostname=MQTT_broker)
-                    publish.single('home-assistant/solar/solar_soc', fn_state_of_charge, hostname=MQTT_broker)
-                    publish.single('home-assistant/solar/solar_bat_temp', fn_battery_temperature, hostname=MQTT_broker)
-                    publish.single('home-assistant/solar/solar_divert_amp', fn_shunt_c_current, hostname=MQTT_broker)
-                    publish.single('home-assistant/solar/solar_used_amp', fn_shunt_b_current, hostname=MQTT_broker)
-                    publish.single('home-assistant/solar/solar_charge_met', charge_params_met, hostname=MQTT_broker)
-                    publish.single('home-assistant/solar/solar_since_charge_met', FN_Days_Since_Charge_Parameters_Met, hostname=MQTT_broker)
-        except:
-            ErrorPrint("Error: RMS - in port " + str(port) + " FNDC module")
+        except Exception as e:
+            ErrorPrint("Error: RMS - port: " + str(port) + " FNDC module " + str(e))
 
         if "End of SunSpec" not in blockResult['DID']:
             reg = reg + blockResult['size'] + 2
         else:
             client.close()
-            logging.info(" Mate connection closed ")
+            mate_run = datetime.now()                                             #DPO debug
+            running_time = round ((mate_run - start_run).total_seconds(),3)       #DPO debug
+            logging.info(" Mate connection closed")
+            print("running time Mate:       ",format(running_time,".3f")," sec")  #DPO debug
+  
             break
-
-  # # Upload Summary data to SQL database
+  
+    # MariaDB upload
     min_bat_temp = None 
     max_bat_temp = None
-    max_pv_voltage = None
-    
-    if SQL_active=='true':
-       
-        date_now=now.strftime("%Y-%m-%d") #current date
-        mydb = mariadb.connect(host=host,port=db_port,user=user,password=password,database=database)
-        
-        sql="SELECT min(battery_temp) from monitormate_fndc where date(date)= DATE(NOW())" #calculate min temp of the day
-        mycursor = mydb.cursor()
-        mycursor.execute(sql)
-        myresult = mycursor.fetchall()
-        min_bat_temp = myresult[0]
-        for x in myresult:
-            min_bat_temp=x[0]
-        
-        sql="SELECT max(battery_temp) from monitormate_fndc where date(date)= DATE(NOW())" #calculate max temp of the day
-        mycursor = mydb.cursor()
-        mycursor.execute(sql)
-        myresult = mycursor.fetchall()
-        max_bat_temp = myresult[0]
-        for x in myresult:
-            max_bat_temp=x[0]
-        
-        sql="SELECT max(pv_voltage) from monitormate_cc where date(date)= DATE(NOW())" #calculate max pv voltage of the day
-        mycursor = mydb.cursor()
-        mycursor.execute(sql)
-        myresult = mycursor.fetchall()
-        max_pv_voltage = myresult[0]
-        for x in myresult:
-            max_pv_voltage=int(x[0])
-        
-        sql="SELECT date,kwh_in,kwh_out,ah_in,max_temp,min_temp,max_soc,min_soc,max_pv_voltage FROM monitormate_summary \
-        where date(date)= DATE(NOW())"
-        mycursor = mydb.cursor()
-        mycursor.execute(sql)
-        myresult = mycursor.fetchall()
-        if not myresult:                                                               # check if any records for today - if not, record for the first time
-            val=(date_now,FN_Todays_NET_Input_kWh,FN_Todays_NET_Output_kWh,FN_Todays_NET_Input_AH,FN_Todays_NET_Output_AH,
-                 max_bat_temp,min_bat_temp,FN_Todays_Maximum_SOC,FN_Todays_Minimum_SOC,max_pv_voltage)
-            sql="INSERT INTO monitormate_summary (date,kwh_in,kwh_out,ah_in,ah_out,max_temp,min_temp,max_soc,min_soc,max_pv_voltage)\
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+    max_pv_voltage = None    
+    try:
+        if SQL_active=='true':
+            
+            date_now=now.strftime("%Y-%m-%d") #current date
+            mydb = mariadb.connect(host=host,port=db_port,user=user,password=password,database=database)
+            
+            # devices data - MariaDB upload
+            n=0
+            for value in db_devices_values:
+                mycursor = mydb.cursor()
+                mycursor.execute(db_devices_sql[n], value)
+                n = n+1
+            
+            # summary of the day calculation for MariaDB upload
+            sql="SELECT min(battery_temp) from monitormate_fndc where date(date)= DATE(NOW())" #calculate min temp of the day
             mycursor = mydb.cursor()
-            mycursor.execute(sql, val)
-            mydb.commit()
-            logging.info(" Summary of the day - first record completed")
-            print("-----------------------------------------------------")
-        else:                                                                           # if records - update table
-            val=(FN_Todays_NET_Input_kWh,FN_Todays_NET_Output_kWh,FN_Todays_NET_Input_AH,FN_Todays_NET_Output_AH,
-                 max_bat_temp,min_bat_temp,FN_Todays_Maximum_SOC,FN_Todays_Minimum_SOC,max_pv_voltage,date_now)
-            sql="UPDATE monitormate_summary SET kwh_in=%s,kwh_out=%s,ah_in=%s,ah_out=%s,max_temp=%s,min_temp=%s,\
-            max_soc=%s,min_soc=%s,max_pv_voltage=%s WHERE date=%s"
+            mycursor.execute(sql)
+            myresult = mycursor.fetchall()
+            min_bat_temp = myresult[0]
+            
+            for x in myresult:
+                min_bat_temp=x[0]
+            
+            sql="SELECT max(battery_temp) from monitormate_fndc where date(date)= DATE(NOW())" #calculate max temp of the day
             mycursor = mydb.cursor()
-            mycursor.execute(sql, val)
-            mydb.commit()
-            logging.info(" Summary of the day - update completed")
-            print("-----------------------------------------------------")
-     
+            mycursor.execute(sql)
+            myresult = mycursor.fetchall()
+            max_bat_temp = myresult[0]
+            
+            for x in myresult:
+                max_bat_temp=x[0]
+            
+            sql="SELECT max(pv_voltage) from monitormate_cc where date(date)= DATE(NOW())" #calculate max pv voltage of the day
+            
+            mycursor = mydb.cursor()
+            mycursor.execute(sql)
+            myresult = mycursor.fetchall()
+            max_pv_voltage = myresult[0]            
+            
+            for x in myresult:
+                max_pv_voltage=int(x[0])
+            
+            sql="SELECT date,kwh_in,kwh_out,ah_in,max_temp,min_temp,max_soc,min_soc,max_pv_voltage FROM monitormate_summary \
+            where date(date)= DATE(NOW())"
+            
+            mycursor = mydb.cursor()
+            mycursor.execute(sql)
+            myresult = mycursor.fetchall()
+            
+            if not myresult:                                                               # check if any records for today - if not, record for the first time
+                val=(date_now,FN_Todays_NET_Input_kWh,FN_Todays_NET_Output_kWh,FN_Todays_NET_Input_AH,FN_Todays_NET_Output_AH,
+                     max_bat_temp,min_bat_temp,FN_Todays_Maximum_SOC,FN_Todays_Minimum_SOC,max_pv_voltage)
+                sql="INSERT INTO monitormate_summary (date,kwh_in,kwh_out,ah_in,ah_out,max_temp,min_temp,max_soc,min_soc,max_pv_voltage)\
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+                mycursor = mydb.cursor()
+                mycursor.execute(sql, val)
+                mydb.commit()
+                logging.info(" Summary of the day - first record completed")
+            else:                                                                           # if records - update table
+                val=(FN_Todays_NET_Input_kWh,FN_Todays_NET_Output_kWh,FN_Todays_NET_Input_AH,FN_Todays_NET_Output_AH,
+                     max_bat_temp,min_bat_temp,FN_Todays_Maximum_SOC,FN_Todays_Minimum_SOC,max_pv_voltage,date_now)
+                sql="UPDATE monitormate_summary SET kwh_in=%s,kwh_out=%s,ah_in=%s,ah_out=%s,max_temp=%s,min_temp=%s,\
+                max_soc=%s,min_soc=%s,max_pv_voltage=%s WHERE date=%s"
+                mycursor = mydb.cursor()
+                mycursor.execute(sql, val)
+                mydb.commit()
+                
+            mycursor.close()
+            mydb.close()
+            mariadb_run = datetime.now()                                             #DPO debug
+            running_time = round ((mariadb_run - mate_run).total_seconds(),3)        #DPO debug
+            print("running time MariaDB:    ",format(running_time,".3f")," sec")     #DPO debug 
+
+    except Exception as e:
+        mycursor.close()
+        mydb.close()
+        mariadb_run = datetime.now()
+        ErrorPrint("Error: RMS - MariaDB upload - "+ str(e))
+
     # Summary data - JSON preparation
     date_now=now.strftime("%Y-%m-%d") #current date
     summary={
@@ -919,18 +920,39 @@ while True:
         "min_soc": FN_Todays_Minimum_SOC,
         "max_soc": FN_Todays_Maximum_SOC,
         "max_pv_voltage": max_pv_voltage,
-        "pv_watts": CC_total_watts
-    }
-    
-    json_data={"time":time, "devices":devices, "summary":summary, "various":various}
-    with open(ServerPath + '/data/status.json', 'w') as outfile:  
-        json.dump(json_data, outfile)
-    if DuplicateSave == 'true':
-        shutil.copy(ServerPath + '/data/status.json', DuplicatePath + '/data/status.json') #copy the file in second location
-    
+        "pv_watts": CC_total_watts }
+
     # summary values - send data via MQTT 
-    if MQTT_active=='true':
-        publish.single('home-assistant/solar/solar_pv_watts', CC_total_watts, hostname=MQTT_broker)
+    mqtt_devices.append ({'home-assistant/solar/solar_pv_watts':CC_total_watts})
    
-   #time.sleep(30)
-    break # DPO - remark it if continuous loop needed
+    #JSON serialisation and save
+    try:
+        json_data={"time":time, "devices":devices, "summary":summary, "various":various}
+        with open(output_path + '/data/status.json', 'w') as outfile:
+            json.dump(json_data, outfile)
+        if duplicate_active == 'true':
+            shutil.copy(output_path + '/data/status.json', duplicate_path + '/data/status.json')#copy the file in second location
+        json_run = datetime.now()                                                           #DPO debug
+        running_time = round ((json_run - mariadb_run).total_seconds(),3)                   #DPO debug
+        print("running time JSON:       ",format(running_time,".3f")," sec")                #DPO debug 
+
+    except Exception as e:
+        ErrorPrint("Error: RMS - JSON w/r - " + str(e))
+        json_run = datetime.now()
+        
+    # MQTT send data to MQTT broker
+    try:
+        if MQTT_active=='true':
+            for mqtt_data in mqtt_devices:
+                for topic in mqtt_data:
+                    publish.single(topic, mqtt_data[topic], hostname=MQTT_broker)
+                    #print(topic + ": " + str(mqtt_data[topic]))                    #DPO debug
+        mqtt_run = datetime.now()                                                   #DPO debug
+        running_time = round ((mqtt_run - json_run).total_seconds(),3)              #DPO debug
+        print("running time MQTT:       ",format(running_time,".3f"), " sec")       #DPO debug 
+      
+    except Exception as e:
+        ErrorPrint("Error: RMS - MQTT module - "+ str(e))
+
+    #time.sleep(30) # DPO - used if continue loop is used
+    break           # DPO - remark it if continuous loop needed

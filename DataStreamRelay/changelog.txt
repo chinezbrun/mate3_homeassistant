@@ -24,3 +24,5 @@ versions history:
 0.5.3_20200903 - more MQTT parameter added for Home Automation integration
 0.5.4_20200101 - samll corrections for better integration with HA
 0.5.5_20201220 - MQTT parameter added for Home Automation integration
+0.6.0_20210121 - major.reduced mate3 connection time, improved stability. split connection routines for Mate3, MariaDB, JSON serialization, MQTT publish
+                 config file changed - debug added, some fields renamed
