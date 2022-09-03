@@ -11,7 +11,7 @@ import paho.mqtt.publish as publish
 import shutil  
 import sys, os
 
-script_ver = "0.6.0_20210121"
+script_ver = "0.7.0_20220421"
 print ("script version: "+ script_ver)
 
 pathname          = os.path.dirname(sys.argv[0])        
@@ -442,6 +442,8 @@ while True:
                   "charger_mode": charger_mode
                   }
                 various.append(various_array)     # append FXR data to devices
+                devices[address-1]["grid_input_mode"] = grid_input_mode
+                devices[address-1]["charger_mode"] = charger_mode
                 
                 # FXR dataconfig - Mqtt preparation
                 if device_list[port]=='VFXR3048_master':
@@ -808,7 +810,9 @@ while True:
                      'home-assistant/solar/solar_divert_amp':fn_shunt_c_current,
                      'home-assistant/solar/solar_used_amp':fn_shunt_b_current,
                      'home-assistant/solar/solar_charge_met':charge_params_met,
-                     'home-assistant/solar/solar_since_charge_met':FN_Days_Since_Charge_Parameters_Met})
+                     'home-assistant/solar/solar_since_charge_met':FN_Days_Since_Charge_Parameters_Met,
+                     'home-assistant/solar/solar_today_net_input_kwh':FN_Todays_NET_Input_kWh,
+                     'home-assistant/solar/solar_today_net_output_kwh':FN_Todays_NET_Output_kWh})
 
         except Exception as e:
             ErrorPrint("Error: RMS - port: " + str(port) + " FNDC module " + str(e))
@@ -869,6 +873,18 @@ while True:
             
             for x in myresult:
                 max_pv_voltage=int(x[0])
+                
+            sql="SELECT min(charge_factor_corrected_net_batt_ah), min(charge_factor_corrected_net_batt_kwh) FROM monitormate_fndc WHERE date(date) = DATE(NOW())"    
+
+            mycursor = mydb.cursor()
+            mycursor.execute(sql)
+            myresult = mycursor.fetchall()
+            
+            for x in myresult:
+                out_batt_ah  = 0
+                out_batt_kwh = 0
+                if x[0] is not None: out_batt_ah  = x[0]    
+                if x[1] is not None: out_batt_kwh = x[1]            
             
             sql="SELECT date,kwh_in,kwh_out,ah_in,max_temp,min_temp,max_soc,min_soc,max_pv_voltage FROM monitormate_summary \
             where date(date)= DATE(NOW())"
@@ -878,18 +894,18 @@ while True:
             myresult = mycursor.fetchall()
             
             if not myresult:                                                               # check if any records for today - if not, record for the first time
-                val=(date_now,FN_Todays_NET_Input_kWh,FN_Todays_NET_Output_kWh,FN_Todays_NET_Input_AH,FN_Todays_NET_Output_AH,
+                val=(date_now,FN_Todays_NET_Input_kWh,FN_Todays_NET_Output_kWh,FN_Todays_NET_Input_AH,FN_Todays_NET_Output_AH,out_batt_ah,out_batt_kwh,
                      max_bat_temp,min_bat_temp,FN_Todays_Maximum_SOC,FN_Todays_Minimum_SOC,max_pv_voltage)
-                sql="INSERT INTO monitormate_summary (date,kwh_in,kwh_out,ah_in,ah_out,max_temp,min_temp,max_soc,min_soc,max_pv_voltage)\
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+                sql="INSERT INTO monitormate_summary (date,kwh_in,kwh_out,ah_in,ah_out,out_batt_ah,out_batt_kwh,max_temp,min_temp,max_soc,min_soc,max_pv_voltage)\
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
                 mycursor = mydb.cursor()
                 mycursor.execute(sql, val)
                 mydb.commit()
                 logging.info(" Summary of the day - first record completed")
             else:                                                                           # if records - update table
-                val=(FN_Todays_NET_Input_kWh,FN_Todays_NET_Output_kWh,FN_Todays_NET_Input_AH,FN_Todays_NET_Output_AH,
+                val=(FN_Todays_NET_Input_kWh,FN_Todays_NET_Output_kWh,FN_Todays_NET_Input_AH,FN_Todays_NET_Output_AH,out_batt_ah,out_batt_kwh,
                      max_bat_temp,min_bat_temp,FN_Todays_Maximum_SOC,FN_Todays_Minimum_SOC,max_pv_voltage,date_now)
-                sql="UPDATE monitormate_summary SET kwh_in=%s,kwh_out=%s,ah_in=%s,ah_out=%s,max_temp=%s,min_temp=%s,\
+                sql="UPDATE monitormate_summary SET kwh_in=%s,kwh_out=%s,ah_in=%s,ah_out=%s,out_batt_ah=%s,out_batt_kwh=%s,max_temp=%s,min_temp=%s,\
                 max_soc=%s,min_soc=%s,max_pv_voltage=%s WHERE date=%s"
                 mycursor = mydb.cursor()
                 mycursor.execute(sql, val)
