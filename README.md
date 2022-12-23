@@ -27,91 +27,82 @@ Integration variants:
 2. JSON file decoding - access to all parameters
 
 sensors should be defined in configuration.yaml
-1. variant MQTT - add below sensors:
-~~~
-sensor:
-  - platform: mqtt
-    name: "solar_ac_input"
-    state_topic: "home-assistant/solar/solar_ac_input"
-    unit_of_measurement: "V" 
-  - platform: mqtt
-    name: "solar_ac_output"
-    state_topic: "home-assistant/solar/solar_ac_output"
-    unit_of_measurement: "V"  
-  - platform: mqtt
-    name: "solar_grid_status"
-    state_topic: "home-assistant/solar/solar_ac_mode"
-    unit_of_measurement: ""
-  - platform: mqtt
-    name: "solar_grid_input_mode"
-    state_topic: "home-assistant/solar/solar_grid_input_mode"
-    unit_of_measurement: ""
-  - platform: mqtt
-    name: "solar_charge_mode"
-    state_topic: "home-assistant/solar/solar_charge_mode"
-    unit_of_measurement: ""
-  - platform: mqtt
-    name: "solar_charger_mode"
-    state_topic: "home-assistant/solar/solar_charger_mode"
-    unit_of_measurement: ""
-  - platform: mqtt
-    name: "solar_ops_mode"
-    state_topic: "home-assistant/solar/solar_operational_mode"
-    unit_of_measurement: ""
-  - platform: mqtt
-    name: "solar_soc"
-    state_topic: "home-assistant/solar/solar_soc"
-    unit_of_measurement: "%"
-  - platform: mqtt
-    name: "solar_bat_voltage"
-    state_topic: "home-assistant/solar/solar_bat_voltage"
-    value_template: "{{value | round(1) }}"
-    unit_of_measurement: "V"
-  - platform: mqtt
-    name: "solar_bat_temp"
-    state_topic: "home-assistant/solar/solar_bat_temp"
-    unit_of_measurement: "grd"
-  - platform: mqtt
-    name: "solar_pv_watts"
-    state_topic: "home-assistant/solar/solar_pv_watts"
-    unit_of_measurement: "W"    
-  - platform: mqtt
-    name: "solar_divert_amp"
-    state_topic: "home-assistant/solar/solar_divert_amp"
-    unit_of_measurement: "A"  
-  - platform: mqtt
-    name: "solar_used_amp"
-    state_topic: "home-assistant/solar/solar_used_amp"
-    unit_of_measurement: "A"  
-  - platform: mqtt
-    name: "solar_since_charge_met"
-    state_topic: "home-assistant/solar/solar_since_charge_met"
-    unit_of_measurement: "days" 
-    value_template: '{{value | round(2)}}'
-  - platform: mqtt
-    name: "solar_charge_met"
-    state_topic: "home-assistant/solar/solar_charge_met"
-    unit_of_measurement: "" 
-  - platform: mqtt
-    name: "solar_power_diversion_uptime"
-    state_topic: "home-assistant/solar/power_diversion_uptime"
-    unit_of_measurement: "days"
 
-  - platform: template
-    sensors:
-      solar_diverted_watts:
-        friendly_name: "solar_diverted_watts"
-        unit_of_measurement: "W"
-        value_template: "{{(states('sensor.solar_bat_voltage')|int) * (-1) * (states('sensor.solar_divert_amp')|int)}}"
-      solar_used_watts:
-        friendly_name: "solar_used_watts"
-        unit_of_measurement: 'W'
-        value_template: "{{(states('sensor.solar_bat_voltage')|int) * (-1) * (states('sensor.solar_used_amp')|int)}}"
+1. variant MQTT - add below sensors in configuration.yaml:
+~~~
+# Example configuration.yaml entry
+mqtt:    
+  sensor:
+    - name: "solar_ac_input"
+      state_topic: "home-assistant/solar/solar_ac_input"
+      unit_of_measurement: "V"
+      state_class: "measurement"
+    - name: "solar_ac_output"
+      state_topic: "home-assistant/solar/solar_ac_output"
+      unit_of_measurement: "V"
+      state_class: "measurement"    
+    - name: "solar_grid_status"
+      state_topic: "home-assistant/solar/solar_ac_mode"
+    - name: "solar_grid_input_mode"
+      state_topic: "home-assistant/solar/solar_grid_input_mode"
+    - name: "solar_charger_mode"
+      state_topic: "home-assistant/solar/solar_charger_mode"
+    - name: "solar_charge_mode"
+      state_topic: "home-assistant/solar/solar_charge_mode"
+    - name: "solar_ops_mode"
+      state_topic: "home-assistant/solar/solar_operational_mode"
+    - name: "solar_soc"
+      state_topic: "home-assistant/solar/solar_soc"
+      unit_of_measurement: "%"
+      state_class: "measurement"
+    - name: "solar_bat_voltage"
+      state_topic: "home-assistant/solar/solar_bat_voltage"
+      value_template: "{{value | round(1) }}"
+      unit_of_measurement: "V"
+      state_class: "measurement"   
+    - name: "solar_bat_temp"
+      state_topic: "home-assistant/solar/solar_bat_temp"
+      unit_of_measurement: "grd"
+      state_class: "measurement"
+    - name: "solar_pv_watts"
+      state_topic: "home-assistant/solar/solar_pv_watts"
+      unit_of_measurement: "W"
+      state_class: "measurement"
+    - name: "solar_divert_amp"
+      state_topic: "home-assistant/solar/solar_divert_amp"
+      unit_of_measurement: "A" 
+      state_class: "measurement"
+    - name: "solar_used_amp"
+      state_topic: "home-assistant/solar/solar_used_amp"
+      unit_of_measurement: "A"
+      state_class: "measurement"
+    - name: "solar_since_charge_met"
+      state_topic: "home-assistant/solar/solar_since_charge_met"
+      unit_of_measurement: "days" 
+      value_template: '{{value | round(2)}}'
+    - name: "solar_charge_met"
+      state_topic: "home-assistant/solar/solar_charge_met"
+      unit_of_measurement: "" 
+    - name: "solar_today_net_input_kwh"
+      state_topic: "home-assistant/solar/solar_today_net_input_kwh"
+      unit_of_measurement: "KWh" 
+      value_template: '{{value | round(2)}}'
+    - name: "solar_today_net_output_kwh"
+      state_topic: "home-assistant/solar/solar_today_net_output_kwh"
+      unit_of_measurement: "KWh" 
+      value_template: '{{value | round(2)}}'
+    - name: "solar_power_diversion_uptime"
+      state_topic: "home-assistant/solar/power_diversion_uptime"
+      unit_of_measurement: "days"
+    - name: "mqtt_client_uptime"
+      state_topic: "home-assistant/solar/mqtt_client_uptime"
+      unit_of_measurement: "days"
 ~~~
 
 2. variant JSON decoding - add sensors like as per your needs, bellow are some examples:
 
 ~~~
+# Example configuration.yaml entry
 sensor:
   - platform: file
     name: solar_ac_input_file
