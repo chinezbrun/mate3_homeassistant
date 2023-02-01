@@ -30,3 +30,4 @@ versions history:
                - improvement: extend devices in json file with grid_input_mode, charger_mode
 0.7.0_20220421 - improvement: upload now the max daily energy removed from battery 'out_batt_ah' and 'out_batt_kwh' in MariaDB monitormate_summary table 
                  -- attn: MariaDB monitormate_summary table should be updated with above 2 columms [float] -- 
+0.7.1_20230201 - improvement: new MQTT topic added : home-assistant/solar/mate the payload is the JSON with all data
