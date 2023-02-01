@@ -24,11 +24,12 @@ A new folder "data" should be created in "www" folder located in home-assistant 
 
 Integration variants:
 1. MQTT - predefined parameters
-2. JSON file decoding - access to all parameters
+2. MQTT - access to all parameters, option avalailable as of v1.0.1 topic: home-assistant/solar/mate, payload: json with all data
+3. JSON file decoding - access to all parameters
 
 sensors should be defined in configuration.yaml
 
-1. variant MQTT - add below sensors in configuration.yaml:
+1. variant MQTT - predefined sensors -- add below sensors in configuration.yaml:
 ~~~
 # Example configuration.yaml entry
 mqtt:    
@@ -98,8 +99,16 @@ mqtt:
       state_topic: "home-assistant/solar/mqtt_client_uptime"
       unit_of_measurement: "days"
 ~~~
-
-2. variant JSON decoding - add sensors like as per your needs, bellow are some examples:
+2. variant MQTT - add sensors like as per your needs,  below example for one sensor:
+~~~
+# Example configuration.yaml entry
+mqtt:    
+  sensor:
+    - name: solar_ac_input_file
+	  state_topic: "home-assistant/solar/mate"
+	  value_template: '{{ value_json.devices[0].ac_input_voltage }}'
+~~~
+3. variant JSON decoding - add sensors like as per your needs, below are some examples:
 
 ~~~
 # Example configuration.yaml entry
