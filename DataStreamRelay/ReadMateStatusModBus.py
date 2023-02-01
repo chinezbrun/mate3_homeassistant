@@ -11,7 +11,7 @@ import paho.mqtt.publish as publish
 import shutil  
 import sys, os
 
-script_ver = "0.7.0_20220421"
+script_ver = "0.7.1_20230201"
 print ("script version: "+ script_ver)
 
 pathname          = os.path.dirname(sys.argv[0])        
@@ -963,6 +963,12 @@ while True:
                 for topic in mqtt_data:
                     publish.single(topic, mqtt_data[topic], hostname=MQTT_broker)
                     #print(topic + ": " + str(mqtt_data[topic]))                    #DPO debug
+                    
+        ## send overall json data via MQTT                                                  
+        state_topic = "home-assistant/solar/mate"                                    
+        message     = json.dumps(json_data)                                         
+        publish.single(state_topic, message, hostname=MQTT_broker)                    
+
         mqtt_run = datetime.now()                                                   #DPO debug
         running_time = round ((mqtt_run - json_run).total_seconds(),3)              #DPO debug
         print("running time MQTT:       ",format(running_time,".3f"), " sec")       #DPO debug 
