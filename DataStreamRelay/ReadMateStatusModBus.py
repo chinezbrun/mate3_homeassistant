@@ -11,7 +11,7 @@ import paho.mqtt.publish as publish
 import shutil  
 import sys, os
 
-script_ver = "0.7.1_20230201"
+script_ver = "0.7.2_20230220"
 print ("script version: "+ script_ver)
 
 pathname          = os.path.dirname(sys.argv[0])        
@@ -36,8 +36,29 @@ database          = config.get('Maria DB connection', 'database')
 output_path       = config.get('Path', 'output_path')
 duplicate_active  = config.get('Path', 'duplicate_active')
 duplicate_path    = config.get('Path', 'duplicate_path')
-MQTT_active       = config.get('MQTT', 'MQTT_active')
-MQTT_broker       = config.get('MQTT', 'MQTT_broker')
+
+# MQTT 
+MQTT_active                     = config.get('MQTT', 'MQTT_active')
+MQTT_broker                     = config.get('MQTT', 'MQTT_broker')
+MQTT_master_ac_input_voltage    = config.get('MQTT','MQTT_master_ac_input_voltage')
+MQTT_master_output_ac_voltage   = config.get('MQTT','MQTT_master_output_ac_voltage')
+MQTT_master_ac_use              = config.get('MQTT','MQTT_master_ac_use')
+MQTT_master_operating_modes     = config.get('MQTT','MQTT_master_operating_modes')
+MQTT_master_grid_input_mode     = config.get('MQTT','MQTT_master_grid_input_mode')
+MQTT_master_charger_mode        = config.get('MQTT','MQTT_master_charger_mode')
+MQTT_controller_1_cc_mode       = config.get('MQTT','MQTT_controller_1_cc_mode')
+MQTT_fndc_battery_voltage       = config.get('MQTT','MQTT_fndc_battery_voltage')
+MQTT_fndc_state_of_charge       = config.get('MQTT','MQTT_fndc_state_of_charge')
+MQTT_fndc_battery_temperature   = config.get('MQTT','MQTT_fndc_battery_temperature')
+MQTT_fndc_shunt_c_current       = config.get('MQTT','MQTT_fndc_shunt_c_current')
+MQTT_fndc_shunt_b_current       = config.get('MQTT','MQTT_fndc_shunt_b_current')
+MQTT_fndc_charge_params_met     = config.get('MQTT','MQTT_fndc_charge_params_met')
+MQTT_fndc_days_since_charge_met = config.get('MQTT','MQTT_fndc_days_since_charge_met')
+MQTT_fndc_todays_net_input_kWh  = config.get('MQTT','MQTT_fndc_todays_net_input_kWh')
+MQTT_fndc_todays_net_output_kWh = config.get('MQTT','MQTT_fndc_todays_net_output_kWh')
+MQTT_summary_cc_total_watts     = config.get('MQTT','MQTT_summary_cc_total_watts') 
+MQTT_all_data                   = config.get('MQTT','MQTT_all_data')
+
 debug             = config.get('General', 'debug')
 
 print("output location:         ", output_path)
@@ -405,10 +426,10 @@ while True:
                 # FXR data - MQTT preparation   
                 if device_list[port]=='VFXR3048_master' :                     # master invertor 
                     mqtt_devices.append(
-                                {'home-assistant/solar/solar_ac_input'        :gs_single_ac_input_voltage,
-                                 'home-assistant/solar/solar_ac_output'       :gs_single_output_ac_voltage,
-                                 'home-assistant/solar/solar_ac_mode'         :ac_use,
-                                 'home-assistant/solar/solar_operational_mode':operating_modes})
+                                {MQTT_master_ac_input_voltage        :gs_single_ac_input_voltage,
+                                 MQTT_master_output_ac_voltage       :gs_single_output_ac_voltage,
+                                 MQTT_master_ac_use         :ac_use,
+                                 MQTT_master_operating_modes:operating_modes})
       
         except Exception as e:
             ErrorPrint("Error: RMS - port: " + str(port) + " FXR module " + str(e))
@@ -448,8 +469,8 @@ while True:
                 # FXR dataconfig - Mqtt preparation
                 if device_list[port]=='VFXR3048_master':
                     mqtt_devices.append(
-                        {'home-assistant/solar/solar_grid_input_mode':grid_input_mode,
-                         'home-assistant/solar/solar_charger_mode':charger_mode})
+                        {MQTT_master_grid_input_mode:grid_input_mode,
+                         MQTT_master_charger_mode:charger_mode})
      
         except Exception as e:
             ErrorPrint("Error: RMS - port: " + str(port) + " FXR config block " + str(e))
@@ -558,7 +579,7 @@ while True:
                 
                 #controlers data - MQTT data preparation
                 if device_list[port]=='FM80':
-                    mqtt_devices.append({'home-assistant/solar/solar_charge_mode':cc_mode})                 
+                    mqtt_devices.append({MQTT_controller_1_cc_mode:cc_mode})                 
         
         except Exception as e:
             ErrorPrint("Error: RMS - port: " + str(port) + " CC module " + str(e))
@@ -804,15 +825,15 @@ while True:
                     
                 # FNDC data - MQTT data preparation topic:value
                 mqtt_devices.append (
-                    {'home-assistant/solar/solar_bat_voltage':fn_battery_voltage,
-                     'home-assistant/solar/solar_soc':fn_state_of_charge,
-                     'home-assistant/solar/solar_bat_temp':fn_battery_temperature,
-                     'home-assistant/solar/solar_divert_amp':fn_shunt_c_current,
-                     'home-assistant/solar/solar_used_amp':fn_shunt_b_current,
-                     'home-assistant/solar/solar_charge_met':charge_params_met,
-                     'home-assistant/solar/solar_since_charge_met':FN_Days_Since_Charge_Parameters_Met,
-                     'home-assistant/solar/solar_today_net_input_kwh':FN_Todays_NET_Input_kWh,
-                     'home-assistant/solar/solar_today_net_output_kwh':FN_Todays_NET_Output_kWh})
+                    {MQTT_fndc_battery_voltage:fn_battery_voltage,
+                     MQTT_fndc_state_of_charge:fn_state_of_charge,
+                     MQTT_fndc_battery_temperature:fn_battery_temperature,
+                     MQTT_fndc_shunt_c_current:fn_shunt_c_current,
+                     MQTT_fndc_shunt_b_current:fn_shunt_b_current,
+                     MQTT_fndc_charge_params_met:charge_params_met,
+                     MQTT_fndc_days_since_charge_met:FN_Days_Since_Charge_Parameters_Met,
+                     MQTT_fndc_todays_net_input_kWh:FN_Todays_NET_Input_kWh,
+                     MQTT_fndc_todays_net_output_kWh:FN_Todays_NET_Output_kWh})
 
         except Exception as e:
             ErrorPrint("Error: RMS - port: " + str(port) + " FNDC module " + str(e))
@@ -939,7 +960,7 @@ while True:
         "pv_watts": CC_total_watts }
 
     # summary values - send data via MQTT 
-    mqtt_devices.append ({'home-assistant/solar/solar_pv_watts':CC_total_watts})
+    mqtt_devices.append ({MQTT_summary_cc_total_watts:CC_total_watts})
    
     #JSON serialisation and save
     try:
@@ -965,7 +986,7 @@ while True:
                     #print(topic + ": " + str(mqtt_data[topic]))                    #DPO debug
                     
         ## send overall json data via MQTT                                                  
-        state_topic = "home-assistant/solar/mate"                                    
+        state_topic = MQTT_all_data                                    
         message     = json.dumps(json_data)                                         
         publish.single(state_topic, message, hostname=MQTT_broker)                    
 
