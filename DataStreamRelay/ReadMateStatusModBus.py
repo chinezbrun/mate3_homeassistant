@@ -11,7 +11,7 @@ import paho.mqtt.publish as publish
 import shutil  
 import sys, os
 
-script_ver = "0.7.2_20230220"
+script_ver = "0.7.3_20230312"
 print ("script version: "+ script_ver)
 
 pathname          = os.path.dirname(sys.argv[0])        
@@ -50,6 +50,7 @@ MQTT_controller_1_cc_mode       = config.get('MQTT','MQTT_controller_1_cc_mode')
 MQTT_fndc_battery_voltage       = config.get('MQTT','MQTT_fndc_battery_voltage')
 MQTT_fndc_state_of_charge       = config.get('MQTT','MQTT_fndc_state_of_charge')
 MQTT_fndc_battery_temperature   = config.get('MQTT','MQTT_fndc_battery_temperature')
+MQTT_fndc_shunt_a_current       = config.get('MQTT','MQTT_fndc_shunt_a_current')
 MQTT_fndc_shunt_c_current       = config.get('MQTT','MQTT_fndc_shunt_c_current')
 MQTT_fndc_shunt_b_current       = config.get('MQTT','MQTT_fndc_shunt_b_current')
 MQTT_fndc_charge_params_met     = config.get('MQTT','MQTT_fndc_charge_params_met')
@@ -262,14 +263,16 @@ logging.info(".. Connected OK to an Outback system")
 #This is the main loop
 #--------------------------------------------------------------
 
-devices           = []                           # used for JSON file - list of data for all devices
-various           = []                           # used for JSON file - different data not connected with MateMonitoring project
-db_devices_values = []                           # used for MariaDB upload - list of all data for all devices  
-db_devices_sql    = []                           # used for MariaDB upload - list of all data for all devices 
-mqtt_devices      = []                           # used for MQTT - list with topics and payloads 
-CC_total_watts    = 0                            # used for MQTT to sum the total pv power from charge controlers
+devices            = []                           # used for JSON file - list of data for all devices
+various            = []                           # used for JSON file - different data not connected with MateMonitoring project
+db_devices_values  = []                           # used for MariaDB upload - list of all data for all devices  
+db_devices_sql     = []                           # used for MariaDB upload - list of all data for all devices 
+mqtt_devices       = []                           # used for MQTT - list with topics and payloads 
+CC_total_watts     = 0                            # used for MQTT to sum the pv power from charge controlers
+CC_total_daily_kwh = 0                            # used for MQTT to sum the daily pv power from charge controlers  
 
 startReg = reg + size + 4
+
 while True:
     time={                                         # used for JSON file - servertime now
     "relay_local_time": date_str,
@@ -499,7 +502,8 @@ while True:
                 response = client.read_holding_registers(reg + 18, 1)
                 CC_Todays_KW = round(int(response.registers[0]) * 0.1,2)
                 logging.info(".... CC Daily_KW (KW) " + str(CC_Todays_KW))
-
+                CC_total_daily_kwh = CC_total_daily_kwh + CC_Todays_KW
+                
                 response = client.read_holding_registers(reg + 13, 1)
                 CC_Watts = round(int(response.registers[0]),2)
                 logging.info(".... CC Actual_watts (W) " + str(CC_Watts))
@@ -558,7 +562,7 @@ while True:
                   "charge_current": cc_batt_current,
                   "pv_current": cc_array_current,
                   "pv_voltage": cc_array_voltage,
-                  "daily_kwh": CC_Todays_KW,
+                  "pv_watts": CC_Watts,
                   "aux": aux_mode,
                   "aux_mode": aux_state,
                   "error_modes": [
@@ -567,6 +571,7 @@ while True:
                   "charge_mode": cc_mode,
                   "battery_voltage": cc_batt_voltage,
                   "daily_ah": CC_Todays_AH,
+                  "daily_kwh": CC_Todays_KW,
                   "label": device_list[port]
                     }
                 devices.append(devices_array)
@@ -828,6 +833,7 @@ while True:
                     {MQTT_fndc_battery_voltage:fn_battery_voltage,
                      MQTT_fndc_state_of_charge:fn_state_of_charge,
                      MQTT_fndc_battery_temperature:fn_battery_temperature,
+                     MQTT_fndc_shunt_a_current:fn_shunt_a_current,
                      MQTT_fndc_shunt_c_current:fn_shunt_c_current,
                      MQTT_fndc_shunt_b_current:fn_shunt_b_current,
                      MQTT_fndc_charge_params_met:charge_params_met,
@@ -957,7 +963,8 @@ while True:
         "min_soc": FN_Todays_Minimum_SOC,
         "max_soc": FN_Todays_Maximum_SOC,
         "max_pv_voltage": max_pv_voltage,
-        "pv_watts": CC_total_watts }
+        "pv_watts": CC_total_watts,
+        "pv_daily_Kwh":CC_total_daily_kwh}
 
     # summary values - send data via MQTT 
     mqtt_devices.append ({MQTT_summary_cc_total_watts:CC_total_watts})
