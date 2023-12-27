@@ -32,3 +32,4 @@ versions history:
                  -- attn: MariaDB monitormate_summary table should be updated with above 2 columms [float] -- 
 0.7.1_20230201 - improvement: new MQTT topic added : home-assistant/solar/mate the payload is the JSON with all data
 0.7.2_20230220 - improvement: all MQTT topics are now configurable in config file
+0.7.3_20231227 - improvement: new MQTT topic added : home-assistant/solar/solar_input_amp 
