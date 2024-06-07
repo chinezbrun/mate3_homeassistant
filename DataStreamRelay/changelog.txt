@@ -32,4 +32,8 @@ versions history:
                  -- attn: MariaDB monitormate_summary table should be updated with above 2 columms [float] -- 
 0.7.1_20230201 - improvement: new MQTT topic added : home-assistant/solar/mate the payload is the JSON with all data
 0.7.2_20230220 - improvement: all MQTT topics are now configurable in config file
-0.7.3_20231227 - improvement: new MQTT topic added : home-assistant/solar/solar_input_amp 
+0.7.3_20230312 - improvement: add instant PV power and total daily PV power in JSON file 
+0.8.0_20240131 - fix: support for python3.6+, change pymodbus to 3.x
+0.9.0_20240606 - improvement: MariaDB - optimised select query, removed redundant records out_ah,out_kw_,max_temp, min_temp, max_pv_voltage 
+                 new: support for multiple devices added (inverters, chargers), MQTT topics removed from config file, hardcoded
+                 new: added more mqtt topics
