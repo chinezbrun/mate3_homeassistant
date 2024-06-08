@@ -20,7 +20,7 @@ Example of LINUX script that can be used to start ReadMateStatusModBus.py. The s
 See your specific OS/distributions documentation for setting up daemons/tasks.
 
 # Home Assistant configuration
-A new folder "data" should be created in "www" folder located in home-assistant (where the ex: \home-assistant\www\data). In this folder, the JSON file will be saved by RMS.
+A new folder "data" should be created in "www" folder located in home-assistant (ex: \home-assistant\www\data). In this folder, the JSON file will be saved by RMS.
 
 Integration variants:
 1. MQTT - predefined parameters with individual topics (MQTT- Explorer can be used to see the full list of them)
