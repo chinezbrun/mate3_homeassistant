@@ -13,7 +13,7 @@ import paho.mqtt.publish as publish
 import shutil  
 import sys, os
 
-script_ver = "0.9.0_20240606"
+script_ver = "0.9.2_20241124"
 print ("script version: "+ script_ver)
 
 pathname          = os.path.dirname(sys.argv[0])        
@@ -352,6 +352,18 @@ while True:
                 aux_relay_list=["disabled","enabled"]
                 aux_relay=aux_relay_list[GS_Single_AUX_Relay_Output_State]
 
+                response = client.read_holding_registers(reg + 21, 1)
+                GS_Single_L_Module_Transformer_Temperature = int(response.registers[0])
+                logging.info(".... FXR L Transformer Temperature  " + str(GS_Single_L_Module_Transformer_Temperature))
+                
+                response = client.read_holding_registers(reg + 22, 1)
+                GS_Single_L_Module_Capacitor_Temperature = int(response.registers[0])
+                logging.info(".... FXR L Capacitor Temperature  " + str(GS_Single_L_Module_Capacitor_Temperature))
+                
+                response = client.read_holding_registers(reg + 23, 1)
+                GS_Single_L_Module_FET_Temperature = int(response.registers[0])
+                logging.info(".... FXR L FET Temperature  " + str(GS_Single_L_Module_FET_Temperature))                  
+
                 response = client.read_holding_registers(reg + 27, 1)
                 gs_single_battery_temperature = decode_int16(int(response.registers[0]))
                 logging.info(".... FXR Battery temperature (V) " + str(gs_single_battery_temperature))
@@ -360,6 +372,7 @@ while True:
                 GS_Split_Error_Flags = int(response.registers[0])
                 logging.info(".... FXR Error Flags " + str(GS_Split_Error_Flags))
                 error_flags='None'
+                if GS_Split_Error_Flags == 0:   error_flags='Nothing'                
                 if GS_Split_Error_Flags == 1:   error_flags='Low AC output voltage'
                 if GS_Split_Error_Flags == 2:   error_flags='Stacking error'               
                 if GS_Split_Error_Flags == 4:   error_flags='Over temperature error'
@@ -373,6 +386,7 @@ while True:
                 GS_Single_Warning_Flags = int(response.registers[0])
                 logging.info(".... FXR Warning Flags " + str(GS_Single_Warning_Flags))
                 warning_flags='None'
+                if GS_Single_Warning_Flags == 0:   warning_flags='Nothing'                
                 if GS_Single_Warning_Flags == 1:   warning_flags='AC input frequency too high'
                 if GS_Single_Warning_Flags == 2:   warning_flags='AC input frequency too low'               
                 if GS_Single_Warning_Flags == 4:   warning_flags='AC input voltage too low'
@@ -393,6 +407,9 @@ while True:
                   "ac_output_voltage": gs_single_output_ac_voltage,
                   "sell_current": GS_Single_Inverter_Sell_Current,
                   "operational_mode": operating_modes,
+                  "transformator_temperature": GS_Single_L_Module_Transformer_Temperature,
+                  "capacitors_temperature": GS_Single_L_Module_Capacitor_Temperature,
+                  "fet_temperature": GS_Single_L_Module_FET_Temperature,
                   "error_modes": [
                     error_flags
                   ],
@@ -420,13 +437,19 @@ while True:
                              "outback/inverters/" + str(inverters) + "/inverter_current":gs_single_inverter_output_current,
                              "outback/inverters/" + str(inverters) + "/charge_current"  :gs_single_inverter_charge_current,
                              "outback/inverters/" + str(inverters) + "/buy_current"     :gs_single_inverter_buy_current,
-                             "outback/inverters/" + str(inverters) + "/sell_current"    :GS_Single_Inverter_Sell_Current,   
+                             "outback/inverters/" + str(inverters) + "/sell_current"    :GS_Single_Inverter_Sell_Current,
+                             "outback/inverters/" + str(inverters) + "/battery_voltage" :gs_single_battery_voltage,
+                             "outback/inverters/" + str(inverters) + "/battery_voltage_compensated" :gs_single_temp_compensated_target_voltage,
                              "outback/inverters/" + str(inverters) + "/ac_input"        :gs_single_ac_input_voltage,
                              "outback/inverters/" + str(inverters) + "/ac_output"       :gs_single_output_ac_voltage,
                              "outback/inverters/" + str(inverters) + "/ac_use"          :ac_use,
                              "outback/inverters/" + str(inverters) + "/operating_modes" :operating_modes,
                              "outback/inverters/" + str(inverters) + "/aux_relay"       :aux_relay,
-                             "outback/inverters/" + str(inverters) + "/warning_modes"   :warning_flags
+                             "outback/inverters/" + str(inverters) + "/error_flags"     :error_flags,
+                             "outback/inverters/" + str(inverters) + "/warning_modes"   :warning_flags,
+                             "outback/inverters/" + str(inverters) + "/trafo_temp"      :GS_Single_L_Module_Transformer_Temperature,
+                             "outback/inverters/" + str(inverters) + "/capacitor_temp"  :GS_Single_L_Module_Capacitor_Temperature,
+                             "outback/inverters/" + str(inverters) + "/fet_temp"        :GS_Single_L_Module_FET_Temperature
                              })
       
         except Exception as e:
@@ -517,7 +540,7 @@ while True:
                 response = client.read_holding_registers(reg + 19, 1)
                 CC_Todays_AH = round(int(response.registers[0]),2)
                 logging.info(".... CC Daily_AH (A) " + str(CC_Todays_AH))
-                
+          
             if "Charge Controller Configuration block" in blockResult['DID']:           #some CC parameters are in configuration block
                 logging.info(".. Charge Controller Configuration block")
                 response = client.read_holding_registers(reg + 2, 1)
@@ -545,6 +568,7 @@ while True:
                 CCconfig_Faults = int(response.registers[0])
                 logging.info(".... CC Error Flags " + str(CCconfig_Faults))
                 error_flags='None'            
+                if CCconfig_Faults == 0:   error_flags='Nothing' 
                 if CCconfig_Faults == 16:  error_flags='Fault Input Active'                
                 if CCconfig_Faults == 32:  error_flags='Shorted Battery Temp Sensor'
                 if CCconfig_Faults == 64:  error_flags='Over Temp'               
@@ -581,6 +605,7 @@ while True:
                 mqtt_devices.append({
                     "outback/chargers/" + str(chargers) + "/charge_current" :cc_batt_current,
                     "outback/chargers/" + str(chargers) + "/pv_current"     :cc_array_current,
+                    "outback/chargers/" + str(chargers) + "/pv_voltage"     :cc_array_voltage,
                     "outback/chargers/" + str(chargers) + "/pv_watts"       :CC_Watts,
                     "outback/chargers/" + str(chargers) + "/aux"            :aux_mode,
                     "outback/chargers/" + str(chargers) + "/aux_mode"       :aux_state,
