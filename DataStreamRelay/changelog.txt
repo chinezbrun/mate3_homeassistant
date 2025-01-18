@@ -39,3 +39,4 @@ versions history:
                  new: added more mqtt topics
 0.9.1_20240711 - add: new mqtt pv voltage, trafo_temp, capacitor_temp, fet_temp, inverter temp compensated, error modes
 0.9.2_20241124 - fix: adapt to Home Assistant core changes [2024.10 up] - 'None' removed from mqtt payload 
+0.9.3_20250118 - fix: pymodbus 3.7-3.8 compatibility
