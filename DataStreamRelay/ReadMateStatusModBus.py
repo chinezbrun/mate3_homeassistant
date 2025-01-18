@@ -13,7 +13,7 @@ import paho.mqtt.publish as publish
 import shutil  
 import sys, os
 
-script_ver = "0.9.2_20241124"
+script_ver = "0.9.3_20250118"
 print ("script version: "+ script_ver)
 
 pathname          = os.path.dirname(sys.argv[0])        
@@ -229,7 +229,7 @@ start_run  = datetime.now() # used only for runtime calculation
 
 # Mate3 connection
 try:
-    client = ModbusClient(mate3_ip, mate3_modbus)
+    client = ModbusClient(mate3_ip, port=mate3_modbus)
     client.connect()
 
     logging.info(".. Make sure we are indeed connected to an Outback power system")
