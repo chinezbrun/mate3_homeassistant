@@ -1,0 +1,4 @@
+mysql-connector==2.2.9
+paho-mqtt==1.6.1
+pymodbus<=3.8.3
+
