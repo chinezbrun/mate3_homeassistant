@@ -10,7 +10,7 @@ This integration is based on ReadMateStatusModBus.py (RMS) output.
 - MQTT broker must be installed (MQTT documentation is out of this project scope)
 
 # ReadMateStatusModBus.py
-- Query MATE3/MATE3S, gets data, format, register in the database (optional), push MQTT data and returns a JSON file.
+- Query MATE3/MATE3S, gets data, format, register in the MariaDB database (optional - more info [here](/docs/MariaDB/readme.txt)), push MQTT data and returns a JSON file.
 - ReadMateStatusModBus.py script should run every X minute -- task should be created (windows or Linux)
 - ReadMateStatusModBus.cfg is the config file for this script -- should be configured based on your needs
 
