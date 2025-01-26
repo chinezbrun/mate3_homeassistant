@@ -1,63 +1,86 @@
 import json
 import time
 import logging
+from logging.handlers import RotatingFileHandler
 import mysql.connector as mariadb
 from datetime import datetime
-#from pymodbus.client.sync import ModbusTcpClient as ModbusClient
 from pymodbus.client import ModbusTcpClient as ModbusClient
-#from pymodbus.client import ModbusTcpClient
 from pymodbus.constants import Endian
-from pymodbus.payload import BinaryPayloadDecoder
 from configparser import ConfigParser
 import paho.mqtt.publish as publish
 import shutil  
 import sys, os
 
-script_ver = "0.9.3_20250119"
+script_ver = "0.10.0_20250126"
 print ("script version: "+ script_ver)
 
-pathname          = os.path.dirname(sys.argv[0])        
-fullpathname      = os.path.abspath(pathname)+'/ReadMateStatusModBus.cfg' 
-print("full path:               ", fullpathname)
+pathname               = os.path.dirname(sys.argv[0])
+working_dir            = os.path.abspath(pathname) 
 
-config            = ConfigParser()
-config.read(fullpathname)
+config                 = ConfigParser()
+config.read(os.path.join(working_dir, 'config.cfg'))
 
 #MATE3 connection
-mate3_ip          = config.get('MATE3 connection', 'mate3_ip')
-mate3_modbus      = config.get('MATE3 connection', 'mate3_modbus')
-sunspec_start_reg = 40000
+mate3_ip               = config.get('MATE3 connection', 'mate3_ip')
+mate3_modbus           = config.get('MATE3 connection', 'mate3_modbus')
+sunspec_start_reg      = 40000
 
 # SQL Maria DB connection
-SQL_active        = config.get('Maria DB connection', 'SQL_active')                             
-host              = config.get('Maria DB connection', 'host')
-db_port           = config.get('Maria DB connection', 'db_port')
-user              = config.get('Maria DB connection', 'user')
-password          = config.get('Maria DB connection', 'password')
-database          = config.get('Maria DB connection', 'database')
-output_path       = config.get('Path', 'output_path')
-duplicate_active  = config.get('Path', 'duplicate_active')
-duplicate_path    = config.get('Path', 'duplicate_path')
+SQL_active             = config.get('Maria DB connection', 'SQL_active')                             
+host                   = config.get('Maria DB connection', 'host')
+db_port                = config.get('Maria DB connection', 'db_port')
+user                   = config.get('Maria DB connection', 'user')
+password               = config.get('Maria DB connection', 'password')
+database               = config.get('Maria DB connection', 'database')
+output_path            = config.get('Path', 'output_path')
+duplicate_active       = config.get('Path', 'duplicate_active')
+duplicate_path         = config.get('Path', 'duplicate_path')
+
+# merge paths to use proper separators windows or Linux
+if output_path == "":
+    output_path = os.path.join(working_dir, 'data')
 
 # MQTT 
-MQTT_active       = config.get('MQTT', 'MQTT_active')
-MQTT_broker       = config.get('MQTT', 'MQTT_broker')
+MQTT_active            = config.get('MQTT', 'MQTT_active')
+MQTT_broker            = config.get('MQTT', 'MQTT_broker')
+LOGGING_LEVEL_FILE     = config.get('General','LOGGING_LEVEL_FILE')
+LOGGING_FILE_MAX_SIZE  = int(config.get('General','LOGGING_FILE_MAX_SIZE'))
+LOGGING_FILE_MAX_FILES = int(config.get('General','LOGGING_FILE_MAX_FILES'))
 
-debug             = config.get('General', 'debug')
-
+print("working directory:       ", working_dir)
 print("output location:         ", output_path)
 print("duplicate output active: ", duplicate_active)
 print("SQL active  :            ", SQL_active)
 print("MQTT active :            ", MQTT_active)
-print("debug active:            ", debug)
 
-# Setup logging
-if debug == "true":
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s', datefmt='%Y%m%d %H:%M:%S')
-logging.getLogger(__name__)
+## LOGGER setup
+# Creează un logger
+logger = logging.getLogger("outback")
+logger.setLevel(LOGGING_LEVEL_FILE)  # Setează nivelul minim de logare
 
-now              = datetime.now()
-date_str         = now.strftime("%Y-%m-%dT%H:%M:%S")
+# Handler pentru consolă
+console_handler = logging.StreamHandler()
+console_handler.setLevel(LOGGING_LEVEL_FILE)
+#formater
+console_formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s', datefmt='%Y%m%d %H:%M:%S')
+console_handler.setFormatter(console_formatter)
+
+# Handler pentru fișier
+# merge paths to use proper separators windows or Linux
+log_path = os.path.join(working_dir, 'data', 'events_rms.log')
+file_handler = RotatingFileHandler(log_path , mode='a', maxBytes=LOGGING_FILE_MAX_SIZE*1000, backupCount=LOGGING_FILE_MAX_FILES, encoding=None, delay=False)
+file_handler.setLevel(LOGGING_LEVEL_FILE)
+
+#formater
+file_formatter = logging.Formatter('%(asctime)s| RMS |%(levelname)8s| %(message)s ',datefmt='%Y%m%d %H:%M:%S') 
+file_handler.setFormatter(file_formatter)
+
+# Adaugă handler-ele la logger
+logger.addHandler(console_handler)
+logger.addHandler(file_handler)
+
+curent_date_time = datetime.now()
+date_str         = curent_date_time.strftime("%Y-%m-%dT%H:%M:%S")
 date_sql         = datetime.now().replace(second=0, microsecond=0)
 
 device_list=[          #used in main loop      
@@ -96,7 +119,27 @@ mate3_did = {
     65535: "End of SunSpec"
 }
 
-# Subroutines
+# Decoder Class to replace BinaryPayloadDecoder that will be removed in pymodbus 3.9.0
+class SunSpecDecoder:
+    def __init__(self, registers):
+        self.registers = registers
+        self.offset = 0
+        
+    def decode_16bit_uint(self):
+        value = self.registers[self.offset]
+        self.offset += 1
+        return value
+    
+    def decode_32bit_uint(self):
+        value = (self.registers[self.offset] << 16) + self.registers[self.offset + 1]
+        self.offset += 2
+        return value
+    
+    def decode_string(self, size):
+        string_data = ''.join([chr((self.registers[i] >> 8) & 0xFF) + chr(self.registers[i] & 0xFF) for i in range(self.offset, self.offset + (size // 2))])
+        self.offset += size // 2
+        return string_data.strip()
+    
 # Read SunSpec Header with logic from pymodbus example
 def decode_int16(signed_value):
     """
@@ -126,7 +169,6 @@ def binary(decimal) :
         otherBase  =  str(decimal % 2) + otherBase
         decimal    //=  2
     return otherBase
-    #return otherBase [::-1] #invert de string    
 
 def get_common_block(basereg):
     """ Read and return the sunspec common information
@@ -134,10 +176,9 @@ def get_common_block(basereg):
     :returns: A dictionary of the common block information
     """
     length   = 69
-    response = client.read_holding_registers(basereg, length + 2)
-    decoder  = BinaryPayloadDecoder.fromRegisters(response.registers,
-                                                 byteorder=Endian.BIG,
-                                                 wordorder=Endian.BIG)
+    response = client.read_holding_registers(basereg, count=(length + 2))
+    decoder = SunSpecDecoder(response.registers)
+    
     return {
         'SunSpec_ID': decoder.decode_32bit_uint(),
         'SunSpec_DID': decoder.decode_16bit_uint(),
@@ -157,25 +198,23 @@ def getSunSpec(basereg):
     # Read two bytes from basereg, a SUNSPEC device will start with 0x53756e53
     # As 8bit ints they are 21365, 28243
     try:
-        response = client.read_holding_registers(basereg, 2)
+        response = client.read_holding_registers(basereg, count=2)
     except:
         return None
 
     if response.registers[0] == 21365 and response.registers[1] == 28243:
-        logging.info(".. SunSpec device found. Reading Manufacturer info")
+        logger.debug(".. SunSpec device found. Reading Manufacturer info")
     else:
         return None
     # There is a 16 bit string at basereg + 4 that contains Manufacturer
-    response = client.read_holding_registers(basereg + 4, 16)
-    decoder  = BinaryPayloadDecoder.fromRegisters(response.registers,
-                                                 byteorder=Endian.BIG,
-                                                 wordorder=Endian.BIG)
+    response = client.read_holding_registers(basereg + 4, count=16)
+    decoder = SunSpecDecoder(response.registers)
     manufacturer = decoder.decode_string(16)
     
     if "OUTBACK_POWER" in str(manufacturer.upper()):
-        logging.info(".. Outback Power device found")
+        logger.debug(".. Outback Power device found")
     else:
-        logging.info(".. Not an Outback Power device. Detected " + manufacturer)
+        logger.debug(".. Not an Outback Power device. Detected " + manufacturer)
         return None
     try:
         register = client.read_holding_registers(basereg + 3)
@@ -204,27 +243,11 @@ def getBlock(basereg):
         print("ERROR: Unknown device type with DID=" + str(blockID))
     return {"size": blocksize, "DID": blockname}
 
-#error log subroutine
-def ErrorPrint (str) :
-    try:
-        with open(output_path + "/data/general_info.log","r") as file:
-            save = file.read()
-        with open(output_path + "/data/general_info.log","w") as file:
-            file = open(output_path + "/data/general_info.log","a")
-            file.write(now.strftime("%d/%m/%Y %H:%M:%S "))
-            file.write(str + "\n")
-            print(str)
-        with open(output_path + "/data/general_info.log","a") as file:
-            file.write(save)
-        return
-    except OSError:
-        print(str,"Error: RMS - Errorhandling block: double error")
-
 #------------------------------------------------
 #  Start MATE3 ModBus Interface
 #------------------------------------------------
 # Try to build the mate3 MODBUS connection
-logging.info("Building MATE3 MODBUS connection")
+logger.debug("Building MATE3 MODBUS connection")
 start_run  = datetime.now() # used only for runtime calculation
 
 # Mate3 connection
@@ -232,19 +255,17 @@ try:
     client = ModbusClient(mate3_ip, port=mate3_modbus)
     client.connect()
 
-    logging.info(".. Make sure we are indeed connected to an Outback power system")
+    logger.debug(".. Make sure we are indeed connected to an Outback power system")
     reg    = sunspec_start_reg
     size   = getSunSpec(reg)
     if size is None:
-        logging.info("We have failed to detect an Outback system. Exciting")
+        logger.debug("We have failed to detect an Outback system. Exciting")
         exit()
 except Exception as e:
     client.close()
-
-    ErrorPrint("Error: RMS - Fail to connect to MATE " + str(e))
-    logging.info(".. Failed to connect to MATE3. Enable SUNSPEC and check port. Exciting")
+    logger.error(".. Failed to connect to MATE3. Enable SUNSPEC and check port. Exciting")
     exit()
-logging.info(".. Connected OK to an Outback system")
+logger.debug(".. Connected OK to an Outback system")
 
 #This is the main loop
 #--------------------------------------------------------------
@@ -273,39 +294,39 @@ while True:
         
         try:        
             if "Single Phase Radian Inverter Real Time Block" in blockResult['DID']:
-                logging.info(".. Detected a Single Phase Radian Inverter Real Time Block" + " -Registry:"+str(reg))
+                logger.debug(".. Detected a Single Phase Radian Inverter Real Time Block" + " -Registry:"+str(reg))
                 inverters = inverters + 1
-                response = client.read_holding_registers(reg + 2, 1)
+                response = client.read_holding_registers(reg + 2, count=1)
                 port=(response.registers[0]-1)
                 address=port+1
-                logging.info(".... Connected on HUB port " + str(response.registers[0]))
+                logger.debug(".... Connected on HUB port " + str(response.registers[0]))
        
                 # Inverter Output current
-                response = client.read_holding_registers(reg + 7, 1)
+                response = client.read_holding_registers(reg + 7, count=1)
                 gs_single_inverter_output_current = round(response.registers[0],2)
-                logging.info(".... FXR Inverted output current (A) " + str(gs_single_inverter_output_current))
+                logger.debug(".... FXR Inverted output current (A) " + str(gs_single_inverter_output_current))
                
-                response = client.read_holding_registers(reg + 8, 1)
+                response = client.read_holding_registers(reg + 8, count=1)
                 gs_single_inverter_charge_current = round(response.registers[0],2)
-                logging.info(".... FXR Charger current (A) " + str(gs_single_inverter_charge_current))
+                logger.debug(".... FXR Charger current (A) " + str(gs_single_inverter_charge_current))
                 
-                response = client.read_holding_registers(reg + 9, 1)
+                response = client.read_holding_registers(reg + 9, count=1)
                 gs_single_inverter_buy_current = round(response.registers[0],2)
-                logging.info(".... FXR Input current (A) " + str(gs_single_inverter_buy_current))
+                logger.debug(".... FXR Input current (A) " + str(gs_single_inverter_buy_current))
                 
-                response = client.read_holding_registers(reg + 30, 1)
+                response = client.read_holding_registers(reg + 30, count=1)
                 gs_single_ac_input_voltage = round(response.registers[0],2)
-                logging.info(".... FXR AC Input Voltage " + str(gs_single_ac_input_voltage))
+                logger.debug(".... FXR AC Input Voltage " + str(gs_single_ac_input_voltage))
 
-                response = client.read_holding_registers(reg + 13, 1)
+                response = client.read_holding_registers(reg + 13, count=1)
                 gs_single_output_ac_voltage = round(response.registers[0],2)
-                logging.info(".... FXR Voltage Out (V) " + str(gs_single_output_ac_voltage))
+                logger.debug(".... FXR Voltage Out (V) " + str(gs_single_output_ac_voltage))
                 
-                response = client.read_holding_registers(reg + 10, 1)
+                response = client.read_holding_registers(reg + 10, count=1)
                 GS_Single_Inverter_Sell_Current = round(response.registers[0],2)
-                logging.info(".... FXR Sell current (A) " + str(GS_Single_Inverter_Sell_Current))
+                logger.debug(".... FXR Sell current (A) " + str(GS_Single_Inverter_Sell_Current))
                
-                response = client.read_holding_registers(reg + 14, 1)
+                response = client.read_holding_registers(reg + 14, count=1)
                 gs_single_inverter_operating_mode = int(response.registers[0])
                 operating_modes_list = [
                 "Off",                    # 0
@@ -327,50 +348,50 @@ while True:
                 "Comm Error"]             # 16 
                 
                 operating_modes=operating_modes_list[gs_single_inverter_operating_mode]
-                logging.info(".... FXR Inverter Operating Mode " + str(gs_single_inverter_operating_mode) +" "+ operating_modes)  
+                logger.debug(".... FXR Inverter Operating Mode " + str(gs_single_inverter_operating_mode) +" "+ operating_modes)  
                 
-                response = client.read_holding_registers(reg + 31, 1)
+                response = client.read_holding_registers(reg + 31, count=1)
                 gs_single_ac_input_state = round(int(response.registers[0]),2)
                 ac_use_list = [
                 "AC Drop",
                 "AC Use"
                 ]
                 ac_use = ac_use_list[gs_single_ac_input_state]
-                logging.info(".... FXR AC USE (Y/N) " + str(gs_single_ac_input_state) + " " + ac_use)
+                logger.debug(".... FXR AC USE (Y/N) " + str(gs_single_ac_input_state) + " " + ac_use)
                 
-                response = client.read_holding_registers(reg + 17, 1)
+                response = client.read_holding_registers(reg + 17, count=1)
                 gs_single_battery_voltage = round(int(response.registers[0]) * 0.1,1)
-                logging.info(".... FXR Battery voltage (V) " + str(gs_single_battery_voltage))
+                logger.debug(".... FXR Battery voltage (V) " + str(gs_single_battery_voltage))
                 
-                response = client.read_holding_registers(reg + 18, 1)
+                response = client.read_holding_registers(reg + 18, count=1)
                 gs_single_temp_compensated_target_voltage = round(int(response.registers[0]) * 0.1,2)
-                logging.info(".... FXR Battery target voltage - temp compensated (V) " + str(gs_single_temp_compensated_target_voltage))
+                logger.debug(".... FXR Battery target voltage - temp compensated (V) " + str(gs_single_temp_compensated_target_voltage))
 
-                response = client.read_holding_registers(reg + 19, 1)
+                response = client.read_holding_registers(reg + 19, count=1)
                 GS_Single_AUX_Relay_Output_State = int(response.registers[0])
-                logging.info(".... FXR Aux Relay state  " + str(GS_Single_AUX_Relay_Output_State))
+                logger.debug(".... FXR Aux Relay state  " + str(GS_Single_AUX_Relay_Output_State))
                 aux_relay_list=["disabled","enabled"]
                 aux_relay=aux_relay_list[GS_Single_AUX_Relay_Output_State]
 
-                response = client.read_holding_registers(reg + 21, 1)
+                response = client.read_holding_registers(reg + 21, count=1)
                 GS_Single_L_Module_Transformer_Temperature = int(response.registers[0])
-                logging.info(".... FXR L Transformer Temperature  " + str(GS_Single_L_Module_Transformer_Temperature))
+                logger.debug(".... FXR L Transformer Temperature  " + str(GS_Single_L_Module_Transformer_Temperature))
                 
-                response = client.read_holding_registers(reg + 22, 1)
+                response = client.read_holding_registers(reg + 22, count=1)
                 GS_Single_L_Module_Capacitor_Temperature = int(response.registers[0])
-                logging.info(".... FXR L Capacitor Temperature  " + str(GS_Single_L_Module_Capacitor_Temperature))
+                logger.debug(".... FXR L Capacitor Temperature  " + str(GS_Single_L_Module_Capacitor_Temperature))
                 
-                response = client.read_holding_registers(reg + 23, 1)
+                response = client.read_holding_registers(reg + 23, count=1)
                 GS_Single_L_Module_FET_Temperature = int(response.registers[0])
-                logging.info(".... FXR L FET Temperature  " + str(GS_Single_L_Module_FET_Temperature))                  
+                logger.debug(".... FXR L FET Temperature  " + str(GS_Single_L_Module_FET_Temperature))                  
 
-                response = client.read_holding_registers(reg + 27, 1)
+                response = client.read_holding_registers(reg + 27, count=1)
                 gs_single_battery_temperature = decode_int16(int(response.registers[0]))
-                logging.info(".... FXR Battery temperature (V) " + str(gs_single_battery_temperature))
+                logger.debug(".... FXR Battery temperature (V) " + str(gs_single_battery_temperature))
                
-                response = client.read_holding_registers(reg + 15, 1)
+                response = client.read_holding_registers(reg + 15, count=1)
                 GS_Split_Error_Flags = int(response.registers[0])
-                logging.info(".... FXR Error Flags " + str(GS_Split_Error_Flags))
+                logger.debug(".... FXR Error Flags " + str(GS_Split_Error_Flags))
                 error_flags='None'
                 if GS_Split_Error_Flags == 0:   error_flags='Nothing'                
                 if GS_Split_Error_Flags == 1:   error_flags='Low AC output voltage'
@@ -382,9 +403,9 @@ while True:
                 if GS_Split_Error_Flags == 64:  error_flags='AC output shorted'               
                 if GS_Split_Error_Flags == 128: error_flags='AC backfeed'
                 
-                response = client.read_holding_registers(reg + 16, 1)
+                response = client.read_holding_registers(reg + 16, count=1)
                 GS_Single_Warning_Flags = int(response.registers[0])
-                logging.info(".... FXR Warning Flags " + str(GS_Single_Warning_Flags))
+                logger.debug(".... FXR Warning Flags " + str(GS_Single_Warning_Flags))
                 warning_flags='None'
                 if GS_Single_Warning_Flags == 0:   warning_flags='Nothing'                
                 if GS_Single_Warning_Flags == 1:   warning_flags='AC input frequency too high'
@@ -453,13 +474,13 @@ while True:
                              })
       
         except Exception as e:
-            ErrorPrint("Error: RMS - port: " + str(port) + " FXR module " + str(e))
+            logger.warning("port: " + str(port) + " FXR module " + str(e))
         
         try:
             if "Radian Inverter Configuration Block" in blockResult['DID']:
-                response = client.read_holding_registers(reg + 26, 1)
+                response = client.read_holding_registers(reg + 26, count=1)
                 GSconfig_Grid_Input_Mode = int(response.registers[0])
-                logging.info(".... FXR Grid input Mode " + str(GSconfig_Grid_Input_Mode))
+                logger.debug(".... FXR Grid input Mode " + str(GSconfig_Grid_Input_Mode))
                 grid_input_mode='None'
                 if GSconfig_Grid_Input_Mode == 0:   grid_input_mode ='Generator'
                 if GSconfig_Grid_Input_Mode == 1:   grid_input_mode ='Support'               
@@ -469,9 +490,9 @@ while True:
                 if GSconfig_Grid_Input_Mode == 5:   grid_input_mode ='MiniGrid' 
                 if GSconfig_Grid_Input_Mode == 6:   grid_input_mode ='GridZero'
                 
-                response = client.read_holding_registers(reg + 24, 1)
+                response = client.read_holding_registers(reg + 24, count=1)
                 GSconfig_Charger_Operating_Mode = int(response.registers[0])
-                logging.info(".... FXR Charger Mode " + str(GSconfig_Charger_Operating_Mode))
+                logger.debug(".... FXR Charger Mode " + str(GSconfig_Charger_Operating_Mode))
                 charger_mode='None'
                 if GSconfig_Charger_Operating_Mode == 0:   charger_mode ='Off'
                 if GSconfig_Charger_Operating_Mode == 1:   charger_mode ='On'
@@ -493,80 +514,80 @@ while True:
                          "outback/inverters/" + str(inverters) + "/charger_mode"   :charger_mode})
      
         except Exception as e:
-            ErrorPrint("Error: RMS - port: " + str(port) + " FXR config block " + str(e))
+            logger.warning("port: " + str(port) + " FXR config block " + str(e))
 
         try:
             if "Charge Controller Block" in blockResult['DID']:
-                logging.info(".. Detected a Charge Controller Block")
+                logger.debug(".. Detected a Charge Controller Block")
                 chargers = chargers +1
 
-                response = client.read_holding_registers(reg + 2, 1)
-                logging.info(".... Connected on HUB port " + str(response.registers[0]))
+                response = client.read_holding_registers(reg + 2, count=1)
+                logger.debug(".... Connected on HUB port " + str(response.registers[0]))
                 port=(response.registers[0]-1)
                 address=port+1
      
-                response = client.read_holding_registers(reg + 10, 1)
+                response = client.read_holding_registers(reg + 10, count=1)
                 cc_batt_current = round(int(response.registers[0]) * 0.1,2)    # correction value *0.1
-                logging.info(".... CC Battery Current (A) " + str(cc_batt_current))
+                logger.debug(".... CC Battery Current (A) " + str(cc_batt_current))
      
-                response = client.read_holding_registers(reg + 11, 1)
+                response = client.read_holding_registers(reg + 11, count=1)
                 cc_array_current = round(int(response.registers[0]),2)
-                logging.info(".... CC Array Current (A) " + str(cc_array_current))
+                logger.debug(".... CC Array Current (A) " + str(cc_array_current))
                 
-                response = client.read_holding_registers(reg + 9, 1)
+                response = client.read_holding_registers(reg + 9, count=1)
                 cc_array_voltage = round(int(response.registers[0]) * 0.1,2)
-                logging.info(".... CC Array Voltage " + str(cc_array_voltage))
+                logger.debug(".... CC Array Voltage " + str(cc_array_voltage))
                 
-                response = client.read_holding_registers(reg + 18, 1)
+                response = client.read_holding_registers(reg + 18, count=1)
                 CC_Todays_KW = round(int(response.registers[0]) * 0.1,2)
-                logging.info(".... CC Daily_KW (KW) " + str(CC_Todays_KW))
+                logger.debug(".... CC Daily_KW (KW) " + str(CC_Todays_KW))
                 CC_total_daily_kwh = CC_total_daily_kwh + CC_Todays_KW
                 
-                response = client.read_holding_registers(reg + 13, 1)
+                response = client.read_holding_registers(reg + 13, count=1)
                 CC_Watts = round(int(response.registers[0]),2)
-                logging.info(".... CC Actual_watts (W) " + str(CC_Watts))
+                logger.debug(".... CC Actual_watts (W) " + str(CC_Watts))
                 CC_total_watts = CC_total_watts + CC_Watts
 
-                response = client.read_holding_registers(reg + 12, 1)
+                response = client.read_holding_registers(reg + 12, count=1)
                 cc_charger_state = round(int(response.registers[0]),2)
-                logging.info(".... CC Charger State " + str(cc_charger_state))  # 0=Silent,1=Float,2=Bulk,3=Absorb,4=EQ
+                logger.debug(".... CC Charger State " + str(cc_charger_state))  # 0=Silent,1=Float,2=Bulk,3=Absorb,4=EQ
                 cc_mode_list=["Silent","Float","Bulk","Absorb","Equalize"]
                 cc_mode=cc_mode_list[cc_charger_state]
      
-                response = client.read_holding_registers(reg + 8, 1)
+                response = client.read_holding_registers(reg + 8, count=1)
                 cc_batt_voltage = round(int(response.registers[0]) * 0.1,2)
-                logging.info(".... CC Battery Voltage (V) " + str(cc_batt_voltage))
+                logger.debug(".... CC Battery Voltage (V) " + str(cc_batt_voltage))
      
-                response = client.read_holding_registers(reg + 19, 1)
+                response = client.read_holding_registers(reg + 19, count=1)
                 CC_Todays_AH = round(int(response.registers[0]),2)
-                logging.info(".... CC Daily_AH (A) " + str(CC_Todays_AH))
+                logger.debug(".... CC Daily_AH (A) " + str(CC_Todays_AH))
           
             if "Charge Controller Configuration block" in blockResult['DID']:           #some CC parameters are in configuration block
-                logging.info(".. Charge Controller Configuration block")
-                response = client.read_holding_registers(reg + 2, 1)
-                logging.info(".... Connected on HUB port " + str(response.registers[0]))
+                logger.debug(".. Charge Controller Configuration block")
+                response = client.read_holding_registers(reg + 2, count=1)
+                logger.debug(".... Connected on HUB port " + str(response.registers[0]))
                 port=(response.registers[0]-1)
                 
-                response = client.read_holding_registers(reg + 32, 1)
+                response = client.read_holding_registers(reg + 32, count=1)
                 CCconfig_AUX_Mode   = int(response.registers[0])
-                logging.info(".... CC Aux Mode " + str(CCconfig_AUX_Mode))
+                logger.debug(".... CC Aux Mode " + str(CCconfig_AUX_Mode))
               
                 aux_mode_list=["Float","Diversion: Relay","Diversion:SSR","Low Batt Disconnect",
                           "Remote","Vent Fan","PV Trigger","Error Output","Night Light"]                                         # 0 disabled, 1 enabled 
                 aux_mode=aux_mode_list[CCconfig_AUX_Mode ]
                 
-                response = client.read_holding_registers(reg + 34, 1)
+                response = client.read_holding_registers(reg + 34, count=1)
                 CCconfig_AUX_State  = int(response.registers[0])
-                logging.info(".... CC Aux State " + str(CCconfig_AUX_State))
+                logger.debug(".... CC Aux State " + str(CCconfig_AUX_State))
                 aux_state_list=[
                 "Disabled",     # 0 - disabled
                 "Enabled"       # 1 - Enabled
                 ]                                         
                 aux_state=aux_state_list[CCconfig_AUX_State]
                 
-                response = client.read_holding_registers(reg + 9, 1)
+                response = client.read_holding_registers(reg + 9, count=1)
                 CCconfig_Faults = int(response.registers[0])
-                logging.info(".... CC Error Flags " + str(CCconfig_Faults))
+                logger.debug(".... CC Error Flags " + str(CCconfig_Faults))
                 error_flags='None'            
                 if CCconfig_Faults == 0:   error_flags='Nothing' 
                 if CCconfig_Faults == 16:  error_flags='Fault Input Active'                
@@ -617,149 +638,149 @@ while True:
                     })                 
         
         except Exception as e:
-            ErrorPrint("Error: RMS - port: " + str(port) + " CC module " + str(e))
+            logger.warning("port: " + str(port) + " CC module " + str(e))
 
         try:
             if "FLEXnet-DC Real Time Block" in blockResult['DID']:
-                logging.info(".. Detect a FLEXnet-DC Real Time Block")
+                logger.debug(".. Detect a FLEXnet-DC Real Time Block")
 
-                response = client.read_holding_registers(reg + 2, 1)
-                logging.info(".... Connected on HUB port " + str(response.registers[0]))
+                response = client.read_holding_registers(reg + 2, count=1)
+                logger.debug(".... Connected on HUB port " + str(response.registers[0]))
                 port=(response.registers[0]-1)
                 address=port+1
 
-                response = client.read_holding_registers(reg + 8, 1)
+                response = client.read_holding_registers(reg + 8, count=1)
                 fn_shunt_a_current = round(decode_int16(int(response.registers[0])) * 0.1,2)
-                logging.info(".... FN Shunt A Current (A) " + str(fn_shunt_a_current))
+                logger.debug(".... FN Shunt A Current (A) " + str(fn_shunt_a_current))
                 
-                response = client.read_holding_registers(reg + 9, 1)
+                response = client.read_holding_registers(reg + 9, count=1)
                 fn_shunt_b_current = round(decode_int16(response.registers[0]) * 0.1,2)
-                logging.info(".... FN Shunt B Current (A) " + str(fn_shunt_b_current))
+                logger.debug(".... FN Shunt B Current (A) " + str(fn_shunt_b_current))
                
-                response = client.read_holding_registers(reg + 10, 1)
+                response = client.read_holding_registers(reg + 10, count=1)
                 fn_shunt_c_current = round(decode_int16(int(response.registers[0])) * 0.1,2)
-                logging.info(".... FN Shunt C Current (A) " + str(fn_shunt_c_current))
+                logger.debug(".... FN Shunt C Current (A) " + str(fn_shunt_c_current))
 
-                response = client.read_holding_registers(reg + 11, 1)
+                response = client.read_holding_registers(reg + 11, count=1)
                 fn_battery_voltage = round(int(response.registers[0]) * 0.1,2)
-                logging.info(".... FN Battery Voltage " + str(fn_battery_voltage))
+                logger.debug(".... FN Battery Voltage " + str(fn_battery_voltage))
 
-                response = client.read_holding_registers(reg + 27, 1)
+                response = client.read_holding_registers(reg + 27, count=1)
                 fn_state_of_charge = int(response.registers[0])
-                logging.info(".... FN State of Charge " + str(fn_state_of_charge))
+                logger.debug(".... FN State of Charge " + str(fn_state_of_charge))
                 
-                response = client.read_holding_registers(reg + 14, 1)
+                response = client.read_holding_registers(reg + 14, count=1)
                 FN_Status_Flags  = int(response.registers[0])
-                logging.info(".... FN Status Flag " + str(FN_Status_Flags))
+                logger.debug(".... FN Status Flag " + str(FN_Status_Flags))
                 charge_params_met="false"
                 if FN_Status_Flags==2 or FN_Status_Flags==6 or FN_Status_Flags==7:
                     charge_params_met="true"              
-                logging.info(".... FN Charge Parameters Met " + str(FN_Status_Flags ) + " " + charge_params_met)
+                logger.debug(".... FN Charge Parameters Met " + str(FN_Status_Flags ) + " " + charge_params_met)
                 relay_status="disabled"
                 if FN_Status_Flags==1 or FN_Status_Flags==3 or FN_Status_Flags==5 or FN_Status_Flags==7:
                     relay_status="enabled"              
-                logging.info(".... FN Relay Status " + str(FN_Status_Flags ) + " " + relay_status)
+                logger.debug(".... FN Relay Status " + str(FN_Status_Flags ) + " " + relay_status)
                 relay_mode="auto"
                 if FN_Status_Flags==4 or FN_Status_Flags==5 or FN_Status_Flags==7:
                     relay_mode="manual"              
-                logging.info(".... FN Relay Mode " + str(FN_Status_Flags ) + " " + relay_mode)
+                logger.debug(".... FN Relay Mode " + str(FN_Status_Flags ) + " " + relay_mode)
 
-                response = client.read_holding_registers(reg + 13, 1)
+                response = client.read_holding_registers(reg + 13, count=1)
                 fn_battery_temperature = decode_int16(int(response.registers[0]))
-                logging.info(".... FN Battery Temperature " + str(fn_battery_temperature))
+                logger.debug(".... FN Battery Temperature " + str(fn_battery_temperature))
 
-                response = client.read_holding_registers(reg + 15, 1)
+                response = client.read_holding_registers(reg + 15, count=1)
                 FN_Shunt_A_Accumulated_AH = round(decode_int16(int(response.registers[0])),2)
-                logging.info(".... FN FN_Shunt_A_Accumulated_AH " + str(FN_Shunt_A_Accumulated_AH))
+                logger.debug(".... FN FN_Shunt_A_Accumulated_AH " + str(FN_Shunt_A_Accumulated_AH))
 
-                response = client.read_holding_registers(reg + 16, 1)
+                response = client.read_holding_registers(reg + 16, count=1)
                 FN_Shunt_A_Accumulated_kWh = round(decode_int16(int(response.registers[0])) * 0.01,2)
-                logging.info(".... FN FN_Shunt_A_Accumulated_kWh " + str(FN_Shunt_A_Accumulated_kWh))
+                logger.debug(".... FN FN_Shunt_A_Accumulated_kWh " + str(FN_Shunt_A_Accumulated_kWh))
 
-                response = client.read_holding_registers(reg + 17, 1)
+                response = client.read_holding_registers(reg + 17, count=1)
                 FN_Shunt_B_Accumulated_AH = round(decode_int16(int(response.registers[0])),2)
-                logging.info(".... FN FN_Shunt_B_Accumulated_AH " + str(FN_Shunt_B_Accumulated_AH))
+                logger.debug(".... FN FN_Shunt_B_Accumulated_AH " + str(FN_Shunt_B_Accumulated_AH))
 
-                response = client.read_holding_registers(reg + 18, 1)
+                response = client.read_holding_registers(reg + 18, count=1)
                 FN_Shunt_B_Accumulated_kWh = round(decode_int16(int(response.registers[0])) * 0.01,2)
-                logging.info(".... FN FN_Shunt_B_Accumulated_kWh " + str(FN_Shunt_B_Accumulated_kWh))
+                logger.debug(".... FN FN_Shunt_B_Accumulated_kWh " + str(FN_Shunt_B_Accumulated_kWh))
                      
-                response = client.read_holding_registers(reg + 19, 1)
+                response = client.read_holding_registers(reg + 19, count=1)
                 FN_Shunt_C_Accumulated_AH = round(decode_int16(int(response.registers[0])),2)
-                logging.info(".... FN FN_Shunt_C_Accumulated_AH " + str(FN_Shunt_C_Accumulated_AH))
+                logger.debug(".... FN FN_Shunt_C_Accumulated_AH " + str(FN_Shunt_C_Accumulated_AH))
 
-                response = client.read_holding_registers(reg + 20, 1)
+                response = client.read_holding_registers(reg + 20, count=1)
                 FN_Shunt_C_Accumulated_kWh = round(decode_int16(int(response.registers[0])) * 0.01,2)
-                logging.info(".... FN FN_Shunt_C_Accumulated_kWh " + str(FN_Shunt_C_Accumulated_kWh))
+                logger.debug(".... FN FN_Shunt_C_Accumulated_kWh " + str(FN_Shunt_C_Accumulated_kWh))
                 
-                response = client.read_holding_registers(reg + 26, 1)
+                response = client.read_holding_registers(reg + 26, count=1)
                 FN_Days_Since_Charge_Parameters_Met = round(int((response.registers[0])) * 0.1,2)
-                logging.info(".... FN days_since_full " + str(FN_Days_Since_Charge_Parameters_Met))
+                logger.debug(".... FN days_since_full " + str(FN_Days_Since_Charge_Parameters_Met))
                 
-                response = client.read_holding_registers(reg + 28, 1)
+                response = client.read_holding_registers(reg + 28, count=1)
                 FN_Todays_Minimum_SOC = int(response.registers[0])
-                logging.info(".... FN Todays_Minimum_SOC " + str(FN_Todays_Minimum_SOC))
+                logger.debug(".... FN Todays_Minimum_SOC " + str(FN_Todays_Minimum_SOC))
 
-                response = client.read_holding_registers(reg + 29, 1)
+                response = client.read_holding_registers(reg + 29, count=1)
                 FN_Todays_Maximum_SOC = int(response.registers[0])
-                logging.info(".... FN Todays_Maximum_SOC " + str(FN_Todays_Maximum_SOC))
+                logger.debug(".... FN Todays_Maximum_SOC " + str(FN_Todays_Maximum_SOC))
                 
-                response = client.read_holding_registers(reg + 30, 1)
+                response = client.read_holding_registers(reg + 30, count=1)
                 FN_Todays_NET_Input_AH = round(int(response.registers[0]),2)
-                logging.info(".... FN Todays_NET_Input_AH " + str(FN_Todays_NET_Input_AH))
+                logger.debug(".... FN Todays_NET_Input_AH " + str(FN_Todays_NET_Input_AH))
 
-                response = client.read_holding_registers(reg + 31, 1)
+                response = client.read_holding_registers(reg + 31, count=1)
                 FN_Todays_NET_Input_kWh = round(int(response.registers[0]) * 0.01,2)
-                logging.info(".... FN Todays_NET_Input_kWh " + str(FN_Todays_NET_Input_kWh))
+                logger.debug(".... FN Todays_NET_Input_kWh " + str(FN_Todays_NET_Input_kWh))
                 
-                response = client.read_holding_registers(reg + 32, 1)
+                response = client.read_holding_registers(reg + 32, count=1)
                 FN_Todays_NET_Output_AH = round(int(response.registers[0]),2)
-                logging.info(".... FN Todays_NET_Output_AH " + str(FN_Todays_NET_Output_AH))
+                logger.debug(".... FN Todays_NET_Output_AH " + str(FN_Todays_NET_Output_AH))
                 
-                response = client.read_holding_registers(reg + 33, 1)
+                response = client.read_holding_registers(reg + 33, count=1)
                 FN_Todays_NET_Output_kWh = round(int(response.registers[0]) * 0.01,2)
-                logging.info(".... FN Todays_NET_Output_kWh " + str(FN_Todays_NET_Output_kWh))
+                logger.debug(".... FN Todays_NET_Output_kWh " + str(FN_Todays_NET_Output_kWh))
 
-                response = client.read_holding_registers(reg + 36, 1)
+                response = client.read_holding_registers(reg + 36, count=1)
                 FN_Charge_Factor_Corrected_NET_Battery_AH = round(decode_int16(int(response.registers[0])),2)
-                logging.info(".... FN Charge_Factor_Corrected_NET_Battery_AH " + str(FN_Charge_Factor_Corrected_NET_Battery_AH))
+                logger.debug(".... FN Charge_Factor_Corrected_NET_Battery_AH " + str(FN_Charge_Factor_Corrected_NET_Battery_AH))
                 
-                response = client.read_holding_registers(reg + 37, 1)
+                response = client.read_holding_registers(reg + 37, count=1)
                 FN_Charge_Factor_Corrected_NET_Battery_kWh = round(decode_int16(int(response.registers[0])) * 0.01,2)
-                logging.info(".... FN_Charge_Factor_Corrected_NET_Battery_kWh " + str(FN_Charge_Factor_Corrected_NET_Battery_kWh))
+                logger.debug(".... FN_Charge_Factor_Corrected_NET_Battery_kWh " + str(FN_Charge_Factor_Corrected_NET_Battery_kWh))
                 
-                response = client.read_holding_registers(reg + 38, 1)
+                response = client.read_holding_registers(reg + 38, count=1)
                 FN_Todays_Minimum_Battery_Voltage = round(decode_int16(int(response.registers[0])) * 0.1 ,2)
-                logging.info(".... FN_Todays_Minimum_Battery_Voltage " + str(FN_Todays_Minimum_Battery_Voltage))                
+                logger.debug(".... FN_Todays_Minimum_Battery_Voltage " + str(FN_Todays_Minimum_Battery_Voltage))                
                 
-                response = client.read_holding_registers(reg + 41, 1)
+                response = client.read_holding_registers(reg + 41, count=1)
                 FN_Todays_Maximum_Battery_Voltage = round(decode_int16(int(response.registers[0])) * 0.1 ,2)
-                logging.info(".... FN_Todays_Maximum_Battery_Voltage " + str(FN_Todays_Maximum_Battery_Voltage))                
+                logger.debug(".... FN_Todays_Maximum_Battery_Voltage " + str(FN_Todays_Maximum_Battery_Voltage))                
 
             if "FLEXnet-DC Configuration Block" in blockResult['DID']:
-                logging.info(".. Detect a FLEXnet-DC Configuration Block")
+                logger.debug(".. Detect a FLEXnet-DC Configuration Block")
 
-                response = client.read_holding_registers(reg + 2, 1)
-                logging.info(".... Connected on HUB port " + str(response.registers[0]))
+                response = client.read_holding_registers(reg + 2, count=1)
+                logger.debug(".... Connected on HUB port " + str(response.registers[0]))
                 port=(response.registers[0]-1)
                 
-                response = client.read_holding_registers(reg + 14, 1)
+                response = client.read_holding_registers(reg + 14, count=1)
                 FNconfig_Shunt_A_Enabled = int(response.registers[0])
                 Shunt_A_Enabled_list=("ON","OFF")
                 Shunt_A_Enabled=Shunt_A_Enabled_list[FNconfig_Shunt_A_Enabled]
-                logging.info(".... FN Shunt_A_Enabled " + Shunt_A_Enabled)
+                logger.debug(".... FN Shunt_A_Enabled " + Shunt_A_Enabled)
                 
-                response = client.read_holding_registers(reg + 15, 1)
+                response = client.read_holding_registers(reg + 15, count=1)
                 FNconfig_Shunt_B_Enabled = int(response.registers[0])
                 Shunt_B_Enabled_list=("ON","OFF")
                 Shunt_B_Enabled=Shunt_B_Enabled_list[FNconfig_Shunt_B_Enabled]
-                logging.info(".... FN Shunt_B_Enabled " + Shunt_B_Enabled)
+                logger.debug(".... FN Shunt_B_Enabled " + Shunt_B_Enabled)
                 
-                response = client.read_holding_registers(reg + 16, 1)
+                response = client.read_holding_registers(reg + 16, count=1)
                 FNconfig_Shunt_C_Enabled = int(response.registers[0])
                 Shunt_C_Enabled_list=("ON","OFF")
                 Shunt_C_Enabled=Shunt_C_Enabled_list[FNconfig_Shunt_C_Enabled]
-                logging.info(".... FN Shunt_C_Enabled " + Shunt_C_Enabled)
+                logger.debug(".... FN Shunt_C_Enabled " + Shunt_C_Enabled)
                 
                 # FNDC data - JSON preparation
                 devices_array= {
@@ -880,16 +901,16 @@ while True:
                      })
 
         except Exception as e:
-            ErrorPrint("Error: RMS - port: " + str(port) + " FNDC module " + str(e))
+            logger.warning("port: " + str(port) + " FNDC module " + str(e))
 
         if "End of SunSpec" not in blockResult['DID']:
             reg = reg + blockResult['size'] + 2
         else:
             client.close()
-            mate_run = datetime.now()                                             #DPO debug
-            running_time = round ((mate_run - start_run).total_seconds(),3)       #DPO debug
-            logging.info(" Mate connection closed")
-            print("running time Mate:       ",format(running_time,".3f")," sec")  #DPO debug
+            mate_run = datetime.now()                                             
+            running_time = round ((mate_run - start_run).total_seconds(),3)       
+            logger.debug(" Mate connection closed")
+            print("running time Mate:       ",format(running_time,".3f")," sec")  
   
             break
   
@@ -898,7 +919,7 @@ while True:
     try:
         if SQL_active=='true':
             
-            date_now=now.strftime("%Y-%m-%d") #current date
+            date_now=curent_date_time.strftime("%Y-%m-%d") #current date
             mydb = mariadb.connect(host=host,port=db_port,user=user,password=password,database=database)
             
             # devices data - MariaDB upload
@@ -923,7 +944,7 @@ while True:
                 mycursor = mydb.cursor()
                 mycursor.execute(sql, val)
                 mydb.commit()
-                logging.info(" Summary of the day - first record completed")
+                logger.debug(" Summary of the day - first record completed")
             else:                                                                           # if records - update table
                 val=(FN_Todays_NET_Input_kWh,FN_Todays_NET_Output_kWh,FN_Todays_NET_Input_AH,FN_Todays_NET_Output_AH,
                      FN_Todays_Maximum_SOC,FN_Todays_Minimum_SOC,date_now)
@@ -935,18 +956,18 @@ while True:
                 
             mycursor.close()
             mydb.close()
-            mariadb_run = datetime.now()                                             #DPO debug
-            running_time = round ((mariadb_run - mate_run).total_seconds(),3)        #DPO debug
-            print("running time MariaDB:    ",format(running_time,".3f")," sec")     #DPO debug 
+            mariadb_run = datetime.now()                                             
+            running_time = round ((mariadb_run - mate_run).total_seconds(),3)        
+            print("running time MariaDB:    ",format(running_time,".3f")," sec")     
 
     except Exception as e:
         mycursor.close()
         mydb.close()
         mariadb_run = datetime.now()
-        ErrorPrint("Error: RMS - MariaDB upload - "+ str(e))
+        logger.warning ("MariaDB upload - "+ str(e))
 
     # Summary data - JSON preparation
-    date_now=now.strftime("%Y-%m-%d") #current date
+    date_now=curent_date_time.strftime("%Y-%m-%d") #current date
     summary={
         "date": date_now,
         "kwh_in": FN_Todays_NET_Input_kWh,
@@ -965,20 +986,21 @@ while True:
         "outback/summary/cc_total_watts":CC_total_watts,
         "outback/summary/pv_daily_Kwh"  :CC_total_daily_kwh
         })
-   
+
     #JSON serialisation and save
     try:
         json_data={"time":time, "devices":devices, "summary":summary, "various":various}
-        with open(output_path + '/data/status.json', 'w') as outfile:
+        with open(os.path.join(output_path, 'mate_status.json'), 'w') as outfile:
             json.dump(json_data, outfile)
         if duplicate_active == 'true':
-            shutil.copy(output_path + '/data/status.json', duplicate_path + '/data/status.json')#copy the file in second location
-        json_run = datetime.now()                                                           #DPO debug
-        running_time = round ((json_run - mariadb_run).total_seconds(),3)                   #DPO debug
-        print("running time JSON:       ",format(running_time,".3f")," sec")                #DPO debug 
+            #shutil.copy(os.path.join(output_path, 'mate_status.json'), os.path.join(duplicate_path, 'mate_status.json'))      #copy the file in second location
+            shutil.copy(os.path.join(output_path, 'mate_status.json'), os.path.join(duplicate_path, 'mate_status.json'))
+        json_run = datetime.now()                                                           
+        running_time = round ((json_run - mariadb_run).total_seconds(),3)                   
+        print("running time JSON:       ",format(running_time,".3f")," sec")                
 
     except Exception as e:
-        ErrorPrint("Error: RMS - JSON w/r - " + str(e))
+        logger.error("JSON read/write - " + str(e))
         json_run = datetime.now()
         
     # MQTT send data to MQTT broker
@@ -987,19 +1009,18 @@ while True:
             for mqtt_data in mqtt_devices:
                 for topic in mqtt_data:
                     publish.single(topic, mqtt_data[topic], hostname=MQTT_broker)
-                    #print(topic + ": " + str(mqtt_data[topic]))                    #DPO debug
                     
         ## send overall json data via MQTT                                                  
         state_topic = "outback/mate"                                   
         message     = json.dumps(json_data)                                         
         publish.single(state_topic, message, hostname=MQTT_broker)                    
 
-        mqtt_run = datetime.now()                                                   #DPO debug
-        running_time = round ((mqtt_run - json_run).total_seconds(),3)              #DPO debug
-        print("running time MQTT:       ",format(running_time,".3f"), " sec")       #DPO debug 
+        mqtt_run = datetime.now()                                                   
+        running_time = round ((mqtt_run - json_run).total_seconds(),3)              
+        print("running time MQTT:       ",format(running_time,".3f"), " sec")        
       
     except Exception as e:
-        ErrorPrint("Error: RMS - MQTT module - "+ str(e))
+        logger.error("MQTT module - "+ str(e))
 
     #time.sleep(30) # DPO - used if continue loop is used
     break           # DPO - remark it if continuous loop needed
