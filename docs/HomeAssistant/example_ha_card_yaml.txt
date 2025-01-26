@@ -1,0 +1,213 @@
+cards:
+  - entity: sensor.outback_pv_power
+    icon: mdi:weather-sunny
+    name: OUTBACK PV POWER
+    card_mod:
+      style: |
+        ha-card {
+          background:
+          {% if states('sensor.outback_pv_power')|int(0) >=100 %}
+          green
+          {% endif %}
+    type: sensor
+    theme: default
+  - type: horizontal-stack
+    cards:
+      - entity: sensor.outback_grid_input_mode
+        icon: mdi:bla
+        name: MODE
+        card_mod:
+          style: |
+            ha-card {
+              color:
+              {% if is_state('sensor.outback_grid_input_mode', 'MiniGrid') and is_state('sensor.outback_ops_mode', 'Inverting')%}
+              green
+              {% elif is_state('sensor.outback_grid_input_mode', 'GridTied') and is_state('sensor.outback_ops_mode', 'Sell')%}
+              green
+              {% else %}
+              {% endif %};
+            }
+        type: entity
+        theme: default
+      - entity: sensor.active_power
+        icon: mdi:bla
+        name: Input Power
+        theme: default
+        type: sensor
+        unit: W
+        card_mod:
+          style: |
+            ha-card {
+              color:
+              {% if states('sensor.active_power')|int(0) < -2500 %}
+              red
+              {% elif states('sensor.active_power')|int(0) > 2500 %}
+              orange
+              {% elif states('sensor.active_power')|int(0) < 0 %}
+              green
+              {% endif %};
+  - cards:
+      - entity: sensor.outback_charge_mode
+        icon: none
+        name: CHARGER
+        card_mod:
+          style: |
+            ha-card {
+              color:
+              {% if states('sensor.outback_battery_in_power')|int(0) > 0 %}
+               green
+              {% elif states('sensor.outback_battery_out_power')|int(0) > 0 %}
+               orange
+              {% endif %};
+        type: entity
+        theme: default
+      - entity: sensor.outback_ops_mode
+        icon: mdi:bla
+        name: INVERTER
+        card_mod:
+          style: |
+            ha-card {
+              color:
+              {% if is_state('sensor.outback_ops_mode', 'Inverting' ) %}
+              green
+              {% elif is_state('sensor.outback_ops_mode', 'Sell' ) %}
+              green
+              {% endif %};
+            }
+        type: sensor
+        theme: default
+    type: horizontal-stack
+  - cards:
+      - entity: sensor.outback_ac_output
+        icon: mdi:bla
+        name: OUTPUT
+        card_mod:
+          style: |
+            ha-card {
+              color: 
+              {% if is_state('sensor.outback_ops_mode', 'Inverting' ) %}
+              green
+              {% elif is_state('sensor.outback_ops_mode', 'Sell' ) %}
+              green
+              {% endif %};
+              background:
+              {% if states('sensor.outback_ac_output')|int(0) > 256%}
+              orange
+              {% elif states('sensor.solar_ac_output')|int(0) > 257%}
+              red
+              {% elif states('sensor.solar_ac_output')|int(0) < 200%}
+              {% else %}
+              red
+              {% endif %};
+            } 
+        theme: default
+        type: sensor
+        unit: v
+      - entity: sensor.grid_power
+        icon: none
+        name: Power
+        type: entity
+        theme: default
+        card_mod:
+          style: |
+            ha-card {
+              color:
+              {% if states('sensor.grid_power')|int(0) > 2500 %}
+              red
+              {% elif states('sensor.grid_power')|int(0) > 2000 %}
+              orange
+              {% elif is_state('sensor.outback_ops_mode', 'Inverting' ) and states('sensor.grid_power')|int(0) > 0%}
+              green
+              {% elif is_state('sensor.outback_ops_mode', 'Sell' ) and states('sensor.grid_power')|int(0) > 0%}
+              green
+              {% endif %};
+    type: horizontal-stack
+  - cards:
+      - entity: sensor.outback_bat_voltage
+        icon: mdi:bla
+        name: Pb
+        card_mod:
+          style: |
+            ha-card {
+              color:
+              {% if states('sensor.outback_bat_voltage')|int(0) < 49 %}
+              {% elif states('sensor.outback_bat_voltage')|int(0) > 66 %}
+              {% elif states('sensor.outback_battery_in_power')|int(0) > 0 %}
+               green
+              {% elif states('sensor.outback_battery_out_power')|int(0) > 0 %}
+               orange
+              {% endif %};
+              
+              background: 
+              {% if states('sensor.outback_bat_voltage')|int(0) < 47.5 %}
+              red
+              {% elif states('sensor.outback_bat_voltage')|int(0) < 49 %}
+              orange
+              {% elif states('sensor.outback_bat_voltage')|int(0) > 66 %}
+              red
+              {% endif %};
+              }
+        type: sensor
+        unit: v
+        theme: default
+      - entity: sensor.outback_soc
+        icon: mdi:bla
+        name: SOC
+        card_mod:
+          style: |
+            ha-card {
+              color:
+              {% if states('sensor.outback_soc')|int(0) < 65 %}
+              {% elif states('sensor.outback_battery_in_power')|int(0) > 0 %}
+              green
+              {% elif states('sensor.outback_battery_out_power')|int(0) > 0 %}
+              orange
+              {% endif %};
+              
+              background: 
+              {% if states('sensor.outback_soc')|int(0) <= 55 %}
+              red
+              {% elif states('sensor.outback_soc')|int(0) < 65 %}
+              orange
+              {% endif %};
+              }
+        type: sensor
+        unit: '%'
+        theme: default
+      - entity: sensor.outback_bat_temp
+        icon: mdi:bla
+        name: TEMP
+        card_mod:
+          style: |
+            ha-card {
+              color:
+              {% if states('sensor.outback_bat_temp')|int(0) < 7 %}
+              {% elif states('sensor.outback_bat_temp')|int(0) > 34 %}
+              {% elif ((states('sensor.outback_bat_temp')|int(0) < 30) and (states('sensor.outback_pv_power')|int(0)) - 
+              (states('sensor.grid_power')|int(0)) - (states('sensor.outback_dc_diverted_power')|int(0))) > 0 %}
+               green
+              {% elif ((states('sensor.solar_bat_temp')|int(0) < 34) and (states('sensor.solar_pv_watts')|int(0)) - 
+              (states('sensor.solar_used_watts')|int(0)) - (states('sensor.solar_diverted_watts')|int(0))) > 0 %}
+               orange
+              {% endif %};
+              background:
+              {% if states('sensor.outback_bat_temp')|int(0) < 7 %}
+              red
+              {% elif states('sensor.outback_bat_temp')|int(0) > 39 %} 
+              red
+              {% elif states('sensor.outback_bat_temp')|int(0) > 34 %}
+              orange
+              {% else %}
+              {% endif %};
+        type: sensor
+        unit: grd
+        theme: default
+    type: horizontal-stack
+  - show_name: true
+    show_icon: false
+    type: button
+    tap_action:
+      action: navigate
+      navigation_path: /lovelace/outback_cfg
+    name: OUTBACK CONFIG
+type: vertical-stack
