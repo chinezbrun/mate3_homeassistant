@@ -1,0 +1,37 @@
+{
+ "time_posted": "2025-01-26 12:03:19",
+ "time_taken": "",
+ "weather": {
+  "date": "notset",
+  "ID": "notset",
+  "description": "notset",
+  "cloud_coverage": "notset"
+ },
+ "predictive_soc": {
+  "deye_soc": "notset",
+  "outback_soc": "notset"
+ },
+ "OutbackBlock": {
+  "OutbackBlock_flag": 0,
+  "outback_schedule": {
+   "sched_1_ac_mode": "notset",
+   "sched_1_ac_mode_hour": "notset",
+   "sched_1_ac_mode_minute": "notset",
+   "sched_2_ac_mode": "notset",
+   "sched_2_ac_mode_hour": "notset",
+   "sched_2_ac_mode_minute": "notset",
+   "sched_3_ac_mode": "notset",
+   "sched_3_ac_mode_hour": "notset",
+   "sched_3_ac_mode_minute": "notset"
+  }
+ },
+ "OutbackSystemControlBlock": {
+  "OutbackSystemControlBlock_flag": 0,
+  "Charge_Enable_Disable": "notset"
+ },
+ "RadianInverterConfigurationBlock": {
+  "InverterConfigurationBlock_flag": 0,
+  "charger_operating_mode": "notset",
+  "grid_input_mode": "notset"
+ }
+}
