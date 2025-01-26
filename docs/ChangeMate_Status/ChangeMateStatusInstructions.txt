@@ -1,0 +1,54 @@
+Changing Specific Parameters in the Mate
+
+A. Modify one parameter in the Mate.
+This option is the preferred one (simple) and has priority in the script. 
+To modify one single parameter use the ChangeMateStatusModBus.py script with the appropriate argument.
+
+Arguments List
+Each argument triggers a specific function in the Mate:
+
+On          # turn on  inverter's charger
+Off         # turn off inverter's charger
+drop        # drop AC
+use         # use AC
+Generator   # switch AC mode to 
+Support     # switch AC mode to       
+GridTied    # switch AC mode to      
+UPS         # switch AC mode to       
+Backup      # switch AC mode to             
+MiniGrid    # switch AC mode to            
+GridZero    # switch AC mode to      
+Disabled    # switch AC mode to 
+StartBulk   # force Mate to 
+StopBulk    # force Mate to
+StartEQ     # force Mate to
+StopEQ      # force Mate to  
+
+Syntax Example
+To change the inverter AC mode to MiniGrid, use the following syntax based on your operating system:
+
+- Linux:
+lxterminal -e python3 /var/www/html/mate3_homeassistant/ChangeMateStatusModBus.py MiniGrid
+
+- Windows:
+python3 //192.168.0.100/web/mate3_homeassistant/ChangeMateStatusModBus.py MiniGrid
+
+Execute the script as 
+
+B. To modify multiple parameters at once in the Mate. 
+This option is used when multiple parameters needs to be modified in the same script run. The option is more complex and usually to integrate various scripts.PAss variables 
+
+Steps:
+1. update the mate_input.json as per your need using the accepted arguments by ChangeMateStatusModBus.py script. This can be done manually or by another script
+2. run the ChangeMateStatusModBus.py script without any argument. 
+
+How is working:
+During start_up, the script will open mate_input.json. When changes are detected (different than "notset") in mate_input.json those parameters will be modified in that run. 
+Date taken will be updated and those specific parameters will be set in "notset" in mate_input.json.
+If argument is provided this is the priority.
+
+Simple home assistant automation can be done using both options. 
+
+General note: 
+Please be carefully with Mate update. 
+Despite the fact that script has protections to do mistakes (i.e wrong parameters outside of provided list) use this as on your own risk.
