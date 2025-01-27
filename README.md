@@ -1,39 +1,49 @@
 # mate3_homeassistant
- OutBackPower Mate3 integration with Home Assistant
+OutBackPower Mate3 integration with Home Assistant
 
 ![Home Assistant](/docs/example_ha_view1.png)
 
-#  How does this software work?
-This integration is based on ReadMateStatusModBus.py (RMS) output.
-- RMS creates a JSON file with almost all useful parameters extracted from Mate3 and push MQTT data for selected ones. More functionalities of RMS can be configured in config file - ReadMateStatusModBus.cfg.
-- Home Assistant needs to be configured to receive MQTT or to decode the JSON file
-- MQTT broker must be installed (MQTT documentation is out of this project scope)
+# How Does This Software Work?
+This integration is based on `ReadMateStatusModBus.py` (RMS) for reading MATE3 and `ChangeMateStatusModBus.py` (CMS) for writing data.
+
+- RMS creates a JSON file with almost all useful parameters extracted from Mate3 and pushes MQTT data for selected parameters. More functionalities of RMS can be configured in the config file (`config.cfg`).
+- Home Assistant needs to be configured to receive MQTT or decode the JSON file.
+- An MQTT broker must be installed (MQTT documentation is outside the scope of this project).
+- Running CMS will write a specific parameter to MATE3. More details can be found [here](/docs/ChangeMate_Status/ChangeMateStatusInstructions.txt).
 
 # ReadMateStatusModBus.py
-- Query MATE3/MATE3S, gets data, format, register in the MariaDB database (optional - more info [here](/docs/MariaDB/readme.txt)), push MQTT data and returns a JSON file.
-- ReadMateStatusModBus.py script should run every X minute -- task should be created (windows or Linux)
-- ReadMateStatusModBus.cfg is the config file for this script -- should be configured based on your needs
+- Queries MATE3/MATE3S, retrieves data, formats it, registers it in the MariaDB database (optional - more info [here](/docs/MariaDB/readme.txt)), pushes MQTT data, and returns a JSON file.
+- The `ReadMateStatusModBus.py` script should run at a set interval. A task should be created for this (Windows or Linux).
+- `config.cfg` is the configuration file for the script and should be set up based on your needs.
 
-ReadMateStatusModBus.sh (is not mandatory)
-===========
-Example of LINUX script that can be used to start ReadMateStatusModBus.py. The script should run with desire update frequency (ex. every minute)
-See your specific OS/distributions documentation for setting up daemons/tasks.
+### ReadMateStatusModBus.sh (Optional)
+This is an example Linux script that can be used to start `ReadMateStatusModBus.py`. The script should run at the desired update frequency (e.g., every minute). Refer to your OS or distribution’s documentation for setting up daemons or scheduled tasks.
 
-# Home Assistant configuration
-A new folder "data" should be created in "www" folder located in home-assistant (ex: \home-assistant\www\data). In this folder, the JSON file will be saved by RMS.
+# ChangeMateStatusModBus.py
+- `ChangeMateStatusModBus.py` can write ModBus data to MATE3. A few parameters can be changed. 
+- The script accepts arguments to indicate the parameters to be changed. It can also change multiple parameters during a single run.
+- More details can be found [here](/docs/ChangeMate_Status/ChangeMateStatusInstructions.txt).
+- Integration in Home Assistant can be achieved using [shell commands](https://www.home-assistant.io/integrations/shell_command/). Examples are below and in the documentation folder [here](/docs/HomeAssistant/).
 
-Integration variants:
-1. MQTT - predefined parameters with individual topics (MQTT- Explorer can be used to see the full list of them)
-2. MQTT - access to all parameters 
-the one common topic:  'outback/mate' where the payload received will be the json with all data (same json as the normal one saved by the script in output location)
-3. JSON file decoding - access to all parameters
+# Home Assistant Configuration
+A new folder named `data` should be created in the `www` folder located in Home Assistant (e.g., `\home-assistant\www\data`). This folder is where the JSON file will be saved by RMS.
 
-sensors should be defined in configuration.yaml
+## Integration Variants
+1. **MQTT - Predefined Parameters with Individual Topics**:
+   - Use MQTT Explorer to view the full list of available topics.
 
-1. variant MQTT - predefined sensors - add below sensors in configuration.yaml:
-~~~
-# Example configuration.yaml entry
+2. **MQTT - Access to All Parameters**:
+   - A single common topic, `outback/mate`, provides a payload containing the JSON with all data (same as the JSON file saved by the script).
 
+3. **JSON File Decoding**:
+   - Use the `file` platform integration in Home Assistant to decode the JSON file saved in the Home Assistant folder (`/config/www/data/status.json`).
+
+## Sensor Configuration in `configuration.yaml`
+
+### Variant 1: MQTT - Predefined Sensors
+Add the following sensors in `configuration.yaml`:
+
+~~~yaml
 mqtt:
   sensor:
     - name: outback_ac_input
@@ -74,7 +84,7 @@ mqtt:
     
     - name: outback_bat_temp
       state_topic: "outback/fndc/battery_temperature"
-      unit_of_measurement: "grd"
+      unit_of_measurement: "°C"
       state_class: "measurement"
     
     - name: outback_pv_power
@@ -126,43 +136,53 @@ mqtt:
       unit_of_measurement: kWh
       value_template: '{{value_json.summary.pv_daily_Kwh | round(2)}}'
 ~~~
-2. variant MQTT - add sensors as per your needs in configuration.yaml, below are some examples:
-~~~
-# Example configuration.yaml entry
+
+### Variant 2: MQTT - Custom Sensors
+Add sensors as per your needs in `configuration.yaml`. Below are examples:
+
+~~~yaml
 mqtt:    
   sensor:
-    ## sensor for ac_input_voltage
-	- name: solar_ac_input_file
-	  state_topic: "outback/mate"
-	  value_template: '{{ value_json.devices[0].ac_input_voltage }}'
-	  
-    ## sensor to calculate selling watts 
+    ## Sensor for AC input voltage
+    - name: solar_ac_input_file
+      state_topic: "outback/mate"
+      value_template: '{{ value_json.devices[0].ac_input_voltage }}'
+      unit_of_measurement: "V"
+
+    ## Sensor to calculate selling watts 
     - name: outback_sell_watts
       state_topic: "outback/mate"
       value_template: '{{(value_json.devices[0].sell_current|int + value_json.devices[1].sell_current|int) * value_json.devices[0].ac_output_voltage|int}}'
       unit_of_measurement: 'W'
-    
-    ## sensor to calculate buying watts
+
+    ## Sensor to calculate buying watts
     - name: outback_buy_watts
       state_topic: "outback/mate"
-      value_template: '{{(value_json.devices[0].buy_current|int + value_json.devices[1].buy_current|int) * value_json.devices[0].ac_input_voltage|int}}'#    unit_of_measurement: 'W' 	  
-	  
+      value_template: '{{(value_json.devices[0].buy_current|int + value_json.devices[1].buy_current|int) * value_json.devices[0].ac_input_voltage|int}}'
+      unit_of_measurement: 'W'
 ~~~
-3. variant JSON decoding 
-Using 'platform file' integration from Home Assistant you can decode the json file saved by the script in home assitant folder location: /config/www/data/status.json.
-In this case just add sensors as per your needs in configuration.yaml, below are some examples:
 
-~~~
-# Example configuration.yaml entry
+### Variant 3: JSON File Decoding
+Use the `file` platform integration to decode the JSON file saved by the script. Add the following sensors in `configuration.yaml`:
+
+~~~yaml
 sensor:
   - platform: file
     name: solar_ac_input_file
     file_path: /config/www/data/status.json
     value_template: '{{ value_json.devices[0].ac_input_voltage }}'
-    unit_of_measurement: 'v'  
+    unit_of_measurement: 'V'
+  
   - platform: file
     name: solar_ac_output_file
     file_path: /config/www/data/status.json
     value_template: '{{ value_json.devices[0].ac_output_voltage }}'
-    unit_of_measurement: 'v'
+    unit_of_measurement: 'V'
 ~~~
+
+## Shell Command 
+input_select with desired arguments should be prior defined
+then add in configuration YAML
+~~~yaml
+shell_command:
+  script_outback_change_grid_input_mode: "python3 /media/web/mate3_homeassistant/ChangeMateStatusModBus.py {{states.input_select.solar_grid_input_mode.state}}"
