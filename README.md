@@ -12,7 +12,7 @@ This integration is based on `ReadMateStatusModBus.py` (RMS) for reading MATE3 a
 - Running CMS will write a specific parameter to MATE3. More details can be found [here](/docs/ChangeMate_Status/ChangeMateStatusInstructions.txt).
 
 # ReadMateStatusModBus.py
-- Queries MATE3/MATE3S, retrieves data, formats it, registers it in the MariaDB database (optional - more info [here](/docs/MariaDB/readme.txt)), pushes MQTT data, and returns a JSON file.
+- Queries MATE3/MATE3S, retrieves data, formats it, registers it in the MariaDB database (optional - more info [here](/docs/MariaDB/Readme.txt)), pushes MQTT data, and returns a JSON file.
 - The `ReadMateStatusModBus.py` script should run at a set interval. A task should be created for this (Windows or Linux).
 - `config.cfg` is the configuration file for the script and should be set up based on your needs.
 
