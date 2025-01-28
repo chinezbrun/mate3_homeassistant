@@ -1,0 +1,88 @@
+type: entities
+entities:
+  - entity: sensor.outback_inverter_current
+    type: custom:multiple-entity-row
+    name: CURENT
+    toggle: false
+    state_header: Total
+    state_color: true
+    entities:
+      - entity: sensor.outback_inverter_sell_current
+        name: Sell
+        format: precision0
+      - entity: sensor.outback_inverter_buy_current
+        name: Buy
+        format: precision0
+      - entity: sensor.outback_inverter_charge_current
+        name: Charge
+        format: precision1
+  - entity: sensor.active_power
+    type: custom:multiple-entity-row
+    name: AC IN
+    toggle: false
+    state_header: Power
+    state_color: true
+    entities:
+      - entity: sensor.outback_ac_input
+        name: voltage
+        format: precision0
+  - entity: sensor.grid_power
+    type: custom:multiple-entity-row
+    name: AC OUT
+    toggle: false
+    state_header: Power
+    state_color: true
+    entities:
+      - entity: sensor.outback_ac_output
+        name: Voltage
+        format: precision0
+  - entity: sensor.outback_ops_mode
+    type: custom:multiple-entity-row
+    name: OPERATION
+    toggle: false
+    state_header: Status
+    state_color: true
+    entities:
+      - entity: sensor.outback_charger_mode
+        name: Charger
+        format: precision0
+    card_mod:
+      style: |
+        :host {
+        {% if states('sensor.outback_ops_mode') =='Inverting' %}
+        --paper-item-icon-color: green
+        {% elif states('sensor.outback_ops_mode') =='Sell' %}
+        --paper-item-icon-color: green
+        {% elif states('sensor.outback_ops_mode') =='Sell' %}
+        --paper-item-icon-color: orange
+        {% else %}
+        {% endif %}
+  - entity: sensor.outback_grid_input_mode
+    type: custom:multiple-entity-row
+    name: GRID
+    toggle: false
+    state_header: Status
+    state_color: true
+    entities:
+      - entity: sensor.outback_grid_status
+        name: Use
+        format: precision0
+  - entity: sensor.outback_inverters_aux_relay
+    name: AUX RELAY
+  - entity: sensor.outback_inverters_warning_modes
+    name: ERROR MODE
+  - entity: sensor.outback_fets_temp
+    type: custom:multiple-entity-row
+    name: TEMPERATURE
+    toggle: false
+    state_header: FET
+    state_color: true
+    entities:
+      - entity: sensor.outback_condens_temp
+        name: Capacitor
+        format: precision0
+      - entity: sensor.outback_transf_temp
+        name: Trafo
+        format: precision0
+title: INVERTER
+state_color: true
