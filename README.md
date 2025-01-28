@@ -1,7 +1,8 @@
-# mate3_homeassistant
-OutBackPower Mate3 integration with Home Assistant
+# OutBackPower Mate3 integration with Home Assistant
 
-![Home Assistant](/docs/HomeAssistant/example_ha_view1.png)
+![Home Assistant](/docs/HomeAssistant/example_ha_sunsynk-power-flow-card.png)
+![card](/docs/HomeAssistant/example_ha_outback_stat.png)
+![card](/docs/HomeAssistant/example_ha_outback_config.png)
 
 # How Does This Software Work?
 This integration is based on `ReadMateStatusModBus.py` (RMS) for reading MATE3 and `ChangeMateStatusModBus.py` (CMS) for writing data.
@@ -180,9 +181,17 @@ sensor:
     unit_of_measurement: 'V'
 ~~~
 
-## Shell Command 
-input_select with desired arguments should be prior defined
-then add in configuration YAML
+## Shell Command (optional)
+add in configuration YAML (in below example input_select with desired arguments should be defined)
 ~~~yaml
 shell_command:
+  script_test_write_mdb: "python /config/phyton_scripts/script_test_summary_mdb.py "
   script_outback_change_grid_input_mode: "python3 /media/web/mate3_homeassistant/ChangeMateStatusModBus.py {{states.input_select.solar_grid_input_mode.state}}"
+  script_outback_change_charger_mode: "python3 /media/web/mate3_homeassistant/ChangeMateStatusModBus.py {{states.input_select.solar_charger_mode.state}}"
+  script_outback_start_bulk: "python3 /media/web/mate3_homeassistant/ChangeMateStatusModBus.py StartBulk"
+  script_outback_stop_bulk: "python3 /media/web/mate3_homeassistant/ChangeMateStatusModBus.py StopBulk"
+  script_outback_start_eq: "python3 /media/web/mate3_homeassistant/ChangeMateStatusModBus.py StartEQ"
+  script_outback_start_eq: "python3 /media/web/mate3_homeassistant/ChangeMateStatusModBus.py StopEQ"
+  script_outback_read_mate_status: "python3 /media/web/mate3_homeassistant/ReadMateStatusModBus.py"
+
+
