@@ -1,7 +1,7 @@
 # mate3_homeassistant
 OutBackPower Mate3 integration with Home Assistant
 
-![Home Assistant](/docs/HomeAsistant/example_ha_view1.png)
+![Home Assistant](/docs/HomeAssistant/example_ha_view1.png)
 
 # How Does This Software Work?
 This integration is based on `ReadMateStatusModBus.py` (RMS) for reading MATE3 and `ChangeMateStatusModBus.py` (CMS) for writing data.
