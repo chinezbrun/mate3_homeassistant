@@ -1,0 +1,79 @@
+type: entities
+entities:
+  - entity: sensor.outback_soc
+    type: custom:multiple-entity-row
+    name: BATTERY
+    toggle: false
+    state_header: SOC
+    state_color: true
+    entities:
+      - entity: sensor.outback_bat_voltage
+        name: voltage
+        format: precision1
+      - entity: sensor.outback_bat_temp
+        name: temp
+        format: precision0
+  - entity: sensor.outback_battery_power
+    type: custom:multiple-entity-row
+    name: BATTERY
+    toggle: false
+    state_header: Power [C]
+    state_color: true
+    entities:
+      - entity: sensor.outback_battery_current
+        name: Current [A]
+        format: precision1
+  - entity: sensor.outback_charge_met
+    type: custom:multiple-entity-row
+    name: CHARGE MET
+    toggle: false
+    state_header: Status
+    state_color: true
+    entities:
+      - entity: sensor.outback_days_since_charge_met
+        name: Since
+        format: precision0
+  - entity: sensor.outback_divert_amp
+    type: custom:multiple-entity-row
+    name: SHUNT
+    toggle: false
+    state_header: Divert [C]
+    state_color: true
+    entities:
+      - entity: sensor.outback_input_amp
+        name: Input [A]
+        format: precision1
+      - entity: sensor.outback_used_amp
+        name: Use [B]
+        format: precision1
+  - entity: sensor.outback_today_net_input_kwh
+    type: custom:multiple-entity-row
+    name: INPUT
+    toggle: false
+    state_header: Daily [kwh]
+    state_color: true
+    entities:
+      - entity: sensor.outback_today_net_input_ah
+        name: Daily [Ah]
+        format: precision1
+  - entity: sensor.outback_today_net_output_kwh
+    type: custom:multiple-entity-row
+    name: OUTPUT
+    toggle: false
+    state_header: Daily [kwh]
+    state_color: true
+    entities:
+      - entity: sensor.outback_today_net_output_ah
+        name: Daily [Ah]
+        format: precision1
+  - entity: sensor.outback_pv_daily_kwh
+    type: custom:multiple-entity-row
+    name: PW
+    toggle: false
+    state_header: Total
+    state_color: true
+    entities:
+      - entity: sensor.outback_pv_power
+        name: Power[W]
+        format: precision0
+title: MONITORING FNDC
