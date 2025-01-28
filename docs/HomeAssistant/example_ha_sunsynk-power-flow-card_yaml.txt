@@ -1,0 +1,147 @@
+## based on sunsynk-power-flow-card (https://slipx06.github.io/sunsynk-power-flow-card/index.html) that need to be installed first
+
+cards:
+  - entity: sensor.outback_pv_power
+    icon: mdi:weather-sunny
+    name: OUTBACK PV POWER
+    card_mod:
+      style: |
+        ha-card {
+          background:
+          {% if states('sensor.outback_pv_power')|int(0) >=100 %}
+          green
+          {% endif %}
+    type: sensor
+    theme: default
+  - type: custom:sunsynk-power-flow-card
+    cardstyle: full
+    show_solar: true
+    battery:
+      show_daily: true
+      dynamic_colour: true
+      shutdown_soc: 70
+      shutdown_soc_offgrid: 50
+      auto_scale: true
+      invert_power: false
+      show_absolute: false
+      linear_gradient: true
+      show_remaining_energy: true
+      animate: true
+      energy: 19000
+      max_power: 2500
+      charge_colour:
+        - 9
+        - 251
+        - 37
+      colour:
+        - 255
+        - 106
+        - 0
+    solar:
+      show_daily: true
+      mppts: 1
+      pv1_name: PV SUD
+      auto_scale: true
+      dynamic_colour: true
+      max_power: 3000
+      colour:
+        - 91
+        - 249
+        - 6
+    load:
+      show_daily: true
+      auto_scale: true
+      dynamic_colour: true
+      dynamic_icon: true
+      show_aux: true
+      aux_type: mdi:water-boiler
+      aux_daily_name: Boiler
+      aux_name: Boiler
+      colour:
+        - 90
+        - 196
+        - 247
+      essential_name: L1 Etaj
+    grid:
+      show_daily_buy: true
+      show_daily_sell: true
+      show_nonessential: false
+      max_power: 3000
+      auto_scale: true
+      export_colour:
+        - 91
+        - 249
+        - 6
+      grid_off_colour:
+        - 255
+        - 106
+        - 0
+      no_grid_colour:
+        - 112
+        - 112
+        - 112
+      grid_name: DEYE L1 AUX
+      additional_loads: 0
+      colour:
+        - 40
+        - 95
+        - 244
+    entities:
+      use_timer_248: switch.sunsynk_toggle_system_timer
+      priority_load_243: switch.sunsynk_toggle_priority_load
+      inverter_voltage_154: sensor.grid_voltage
+      inverter_power_175: sensor.sunsynk_inverter_power
+      grid_connected_status_194: binary_sensor.sunsynk_grid_connected_status
+      inverter_status_59: sensor.outback_ops_mode
+      battery_voltage_183: sensor.outback_bat_voltage
+      battery_soc_184: sensor.outback_soc
+      battery_power_190: sensor.outback_battery_power
+      grid_power_169: sensor.active_power
+      day_grid_export_77: sensor.energy_outback_grid_sell_today
+      day_load_energy_84: sensor.energy_energy_outback_loads_today
+      essential_power: sensor.grid_power
+      nonessential_power: none
+      aux_power_166: sensor.outback_dc_diverted_power
+      day_pv_energy_108: sensor.outback_pv_daily_kwh
+      pv1_power_186: sensor.outback_pv_watts
+      pv2_power_187: sensor.sunsynk_pv2_power
+      pv1_current_110: sensor.outback_pv_current
+      pv2_voltage_111: sensor.sunsynk_pv2_voltage
+      pv2_current_112: sensor.sunsynk_pv2_current
+      grid_ct_power_172: sensor.active_power
+      battery_current_191: sensor.outback_battery_current
+      pv1_voltage_109: sensor.outback_pv_voltage
+      battery_status: sensor.outback_charge_mode
+      day_battery_charge_70: sensor.energy_outback_battery_in_today
+      day_battery_discharge_71: sensor.energy_outback_battery_out_today
+      battery_temp_182: sensor.outback_bat_temp
+      day_grid_import_76: sensor.energy_outback_grid_buy_today
+      inverter_current_164: sensor.outback_inverter_current
+      grid_voltage: sensor.esphome_deye_deye_grid_voltage_l1
+      load_frequency_192: sensor.frequency
+      aux_load1_extra: sensor.sonoff_th16
+      aux_connected_status: switch.sonoff_th16
+    large_font: true
+    panel_mode: true
+    show_battery: true
+    show_grid: true
+    inverter:
+      modern: true
+      autarky: power
+  - type: horizontal-stack
+    cards:
+      - show_name: true
+        show_icon: false
+        type: button
+        tap_action:
+          action: navigate
+          navigation_path: /lovelace/outback-stat
+        name: OUTBACK STAT
+      - show_name: true
+        show_icon: false
+        type: button
+        tap_action:
+          action: navigate
+          navigation_path: /lovelace/outback_cfg
+        name: "OUTBACK CFG "
+type: vertical-stack
