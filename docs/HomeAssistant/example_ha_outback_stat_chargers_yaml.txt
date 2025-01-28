@@ -1,0 +1,84 @@
+type: entities
+entities:
+  - entity: sensor.outback_pv_watts
+    type: custom:multiple-entity-row
+    name: PV 1
+    toggle: false
+    state_header: power
+    state_color: true
+    entities:
+      - entity: sensor.outback_pv_voltage
+        name: voltage
+        format: precision0
+      - entity: sensor.outback_pv_current
+        name: current
+        format: precision1
+    card_mod:
+      style: |
+        :host {
+        {% if states('sensor.outback_pv_watts')|int(0) > 50 %}
+        --paper-item-icon-color: green
+        {% endif %}
+  - entity: sensor.outback_charge_mode
+    type: custom:multiple-entity-row
+    name: CHARGER
+    toggle: false
+    state_header: MODE
+    state_color: true
+    entities:
+      - entity: sensor.outback_chargers_battery_voltage
+        name: voltage
+        format: precision1
+      - entity: sensor.outback_chargers_charge_current
+        name: current
+    card_mod:
+      style: |
+        :host {
+        {% if states('sensor.outback_charge_mode') != 'Silent' %}
+        --paper-item-icon-color: green
+        {% endif %}
+  - entity: sensor.outback_chargers_daily_kwh_1
+    type: custom:multiple-entity-row
+    name: OUTPUT
+    toggle: false
+    state_header: Daily[Kwh]
+    state_color: true
+    entities:
+      - entity: sensor.outback_chargers_daily_ah_1
+        name: Daily[Ah]
+    card_mod:
+      style: |
+        :host {
+        {% if states('sensor.outback_chargers_daily_kwh_1')|int(0) > 0 %}
+        --paper-item-icon-color: yellow
+        {% endif %}
+  - entity: sensor.outback_charge_mode
+    name: OPERATION
+    card_mod:
+      style: |
+        :host {
+        {% if states('sensor.outback_charge_mode') != 'Silent' %}
+        --paper-item-icon-color: green
+        {% endif %}
+  - entity: sensor.outback_chargers_aux_mode
+    name: AUX MODE
+    secondary_info: last-updated
+    card_mod:
+      style: |
+        :host {
+        {% if states('sensor.outback_chargers_aux_mode') == 'Enabled' %}
+        --paper-item-icon-color: green
+        {% endif %}
+  - entity: sensor.outback_chargers_error_modes
+    name: ERROR MODES
+    secondary_info: last-updated
+    card_mod:
+      style: |
+        :host {
+        {% if states('sensor.outback_chargers_error_modes') == 'Nothing' %}
+        --paper-item-icon-color: green
+        {% else%}
+        --paper-item-icon-color: red
+        {% endif %}
+title: CHARGERS
+state_color: true
