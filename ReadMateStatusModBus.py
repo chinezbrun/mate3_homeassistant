@@ -11,7 +11,7 @@ import paho.mqtt.publish as publish
 import shutil  
 import sys, os
 
-script_ver = "0.10.0_20250126"
+script_ver = "0.11.0_20250312"
 print ("script version: "+ script_ver)
 
 pathname               = os.path.dirname(sys.argv[0])
@@ -43,6 +43,10 @@ if output_path == "":
 # MQTT 
 MQTT_active            = config.get('MQTT', 'MQTT_active')
 MQTT_broker            = config.get('MQTT', 'MQTT_broker')
+MQTT_port              = int(config.get('MQTT', 'MQTT_port'))
+MQTT_username          = config.get('MQTT', 'MQTT_username')
+MQTT_password          = config.get('MQTT', 'MQTT_password')
+
 LOGGING_LEVEL_FILE     = config.get('General','LOGGING_LEVEL_FILE')
 LOGGING_FILE_MAX_SIZE  = int(config.get('General','LOGGING_FILE_MAX_SIZE'))
 LOGGING_FILE_MAX_FILES = int(config.get('General','LOGGING_FILE_MAX_FILES'))
@@ -291,10 +295,239 @@ while True:
     reg = startReg
     for block in range(0, 30):
         blockResult = getBlock(reg)
-        
+   
+        try:        
+            if "Split Phase Radian Inverter Real Time Block" in blockResult['DID']:
+                logger.debug(".. Detected a Split Phase Radian Inverter Real Time Block")
+                inverters = inverters + 1
+                response = client.read_holding_registers(reg + 2, count=1)
+                port=(response.registers[0]-1)
+                address=port+1
+                logger.debug(".... Connected on HUB port " + str(response.registers[0]))
+       
+                # Inverter L1 phase data
+                response = client.read_holding_registers(reg + 7, count=1)
+                gs_single_inverter_output_current = round(response.registers[0],2)
+                logger.debug(".... GS L1 Inverted output current (A) " + str(gs_single_inverter_output_current))
+               
+                response = client.read_holding_registers(reg + 8, count=1)
+                gs_single_inverter_charge_current = round(response.registers[0],2)
+                logger.debug(".... GS L1 Charger current (A) " + str(gs_single_inverter_charge_current))
+                
+                response = client.read_holding_registers(reg + 9, count=1)
+                gs_single_inverter_buy_current = round(response.registers[0],2)
+                logger.debug(".... GS L1 Input current (A) " + str(gs_single_inverter_buy_current))
+                
+                response = client.read_holding_registers(reg + 10, count=1)
+                GS_Single_Inverter_Sell_Current = round(response.registers[0],2)
+                logger.debug(".... GS L1 Sell current (A) " + str(GS_Single_Inverter_Sell_Current))
+
+                response = client.read_holding_registers(reg + 11, count=1)
+                gs_single_ac_input_voltage = round(response.registers[0],2)
+                logger.debug(".... GS L1 AC Input Voltage " + str(gs_single_ac_input_voltage))
+
+                response = client.read_holding_registers(reg + 13, count=1)
+                gs_single_output_ac_voltage = round(response.registers[0],2)
+                logger.debug(".... GS L1 Voltage Out (V) " + str(gs_single_output_ac_voltage))
+                
+                # Inverter L2 phase data
+                response = client.read_holding_registers(reg + 14, count=1)
+                gs_single_inverter_l2_output_current = round(response.registers[0],2)
+                logger.debug(".... GS L2 Inverted output current (A) " + str(gs_single_inverter_l2_output_current))
+               
+                response = client.read_holding_registers(reg + 15, count=1)
+                gs_single_inverter_charge_l2_current = round(response.registers[0],2)
+                logger.debug(".... GS L2 Charger current (A) " + str(gs_single_inverter_charge_l2_current))
+                
+                response = client.read_holding_registers(reg + 16, count=1)
+                gs_single_inverter_buy_l2_current = round(response.registers[0],2)
+                logger.debug(".... GS L2 Buy current (A) " + str(gs_single_inverter_buy_l2_current))
+                
+                response = client.read_holding_registers(reg + 17, count=1)
+                GS_Single_Inverter_Sell_l2_Current = round(response.registers[0],2)
+                logger.debug(".... GS L2 Sell current (A) " + str(GS_Single_Inverter_Sell_l2_Current))
+
+                response = client.read_holding_registers(reg + 18, count=1)
+                gs_single_ac_input_l2_voltage = round(response.registers[0],2)
+                logger.debug(".... GS L2 AC Input Voltage " + str(gs_single_ac_input_l2_voltage))
+
+                response = client.read_holding_registers(reg + 20, count=1)
+                gs_single_output_ac_l2_voltage = round(response.registers[0],2)
+                logger.debug(".... GS L2 Voltage Out (V) " + str(gs_single_output_ac_l2_voltage))
+
+                response = client.read_holding_registers(reg + 21, count=1)
+                gs_single_inverter_operating_mode = int(response.registers[0])
+                operating_modes_list = [
+                "Off",                    # 0
+                "Searching",              # 1
+                "Inverting",              # 2
+                "Charging",               # 3
+                "Silent",                 # 4
+                "Float",                  # 5
+                "Equalize",               # 6
+                "Charger Off",            # 7
+                "Support",                # 8
+                "Sell",                   # 9
+                "Pass-through",           # 10
+                "Slave Inverter On",      # 11
+                "Slave Inverter Off",     # 12
+                "Unknown",                # 13
+                "Offsetting",             # 14
+                "AGS Error",              # 15
+                "Comm Error"]             # 16 
+                
+                operating_modes=operating_modes_list[gs_single_inverter_operating_mode]
+                logger.debug(".... GS Inverter Operating Mode " + str(gs_single_inverter_operating_mode) +" "+ operating_modes)  
+                
+                response = client.read_holding_registers(reg + 38, count=1)
+                gs_single_ac_input_state = round(int(response.registers[0]),2)
+                ac_use_list = [
+                "AC Drop",
+                "AC Use"
+                ]
+                ac_use = ac_use_list[gs_single_ac_input_state]
+                logger.debug(".... GS AC USE (Y/N) " + str(gs_single_ac_input_state) + " " + ac_use)
+                
+                response = client.read_holding_registers(reg + 24, count=1)
+                gs_single_battery_voltage = round(int(response.registers[0]) * 0.1,1)
+                logger.debug(".... GS Battery voltage (V) " + str(gs_single_battery_voltage))
+                
+                response = client.read_holding_registers(reg + 25, count=1)
+                gs_single_temp_compensated_target_voltage = round(int(response.registers[0]) * 0.1,2)
+                logger.debug(".... GS Battery target voltage - temp compensated (V) " + str(gs_single_temp_compensated_target_voltage))
+
+                response = client.read_holding_registers(reg + 26, count=1)
+                GS_Single_AUX_Relay_Output_State = int(response.registers[0])
+                logger.debug(".... GS Aux Relay state  " + str(GS_Single_AUX_Relay_Output_State))
+                aux_relay_list=["disabled","enabled"]
+                aux_relay=aux_relay_list[GS_Single_AUX_Relay_Output_State]
+
+                response = client.read_holding_registers(reg + 28, count=1)
+                GS_Single_L_Module_Transformer_Temperature = int(response.registers[0])
+                logger.debug(".... GS L Transformer Temperature  " + str(GS_Single_L_Module_Transformer_Temperature))
+                
+                response = client.read_holding_registers(reg + 29, count=1)
+                GS_Single_L_Module_Capacitor_Temperature = int(response.registers[0])
+                logger.debug(".... GS L Capacitor Temperature  " + str(GS_Single_L_Module_Capacitor_Temperature))
+  
+                response = client.read_holding_registers(reg + 31, count=1)
+                GS_Single_R_Module_FET_Temperature = int(response.registers[0])
+                logger.debug(".... GS L FET Temperature  " + str(GS_Single_R_Module_FET_Temperature))                  
+
+                response = client.read_holding_registers(reg + 32, count=1)
+                GS_Single_R_Module_Transformer_Temperature = int(response.registers[0])
+                logger.debug(".... GS L Transformer Temperature  " + str(GS_Single_R_Module_Transformer_Temperature))
+                
+                response = client.read_holding_registers(reg + 33, count=1)
+                GS_Single_R_Module_Capacitor_Temperature = int(response.registers[0])
+                logger.debug(".... GS L Capacitor Temperature  " + str(GS_Single_R_Module_Capacitor_Temperature))
+ 
+                response = client.read_holding_registers(reg + 30, count=1)
+                GS_Single_L_Module_FET_Temperature = int(response.registers[0])
+                logger.debug(".... GS L FET Temperature  " + str(GS_Single_L_Module_FET_Temperature))    
+
+                response = client.read_holding_registers(reg + 34, count=1)
+                gs_single_battery_temperature = decode_int16(int(response.registers[0]))
+                logger.debug(".... GS Battery temperature (V) " + str(gs_single_battery_temperature))
+               
+                response = client.read_holding_registers(reg + 22, count=1)
+                GS_Split_Error_Flags = int(response.registers[0])
+                logger.debug(".... GS Error Flags " + str(GS_Split_Error_Flags))
+                error_flags='None'
+                if GS_Split_Error_Flags == 0:   error_flags='Nothing'                
+                if GS_Split_Error_Flags == 1:   error_flags='Low AC output voltage'
+                if GS_Split_Error_Flags == 2:   error_flags='Stacking error'               
+                if GS_Split_Error_Flags == 4:   error_flags='Over temperature error'
+                if GS_Split_Error_Flags == 8:   error_flags='Low battery voltage'               
+                if GS_Split_Error_Flags == 16:  error_flags='Phase loss'                
+                if GS_Split_Error_Flags == 32:  error_flags='High battery voltage'
+                if GS_Split_Error_Flags == 64:  error_flags='AC output shorted'               
+                if GS_Split_Error_Flags == 128: error_flags='AC backfeed'
+                
+                response = client.read_holding_registers(reg + 23, count=1)
+                GS_Single_Warning_Flags = int(response.registers[0])
+                logger.debug(".... GS Warning Flags " + str(GS_Single_Warning_Flags))
+                warning_flags='None'
+                if GS_Single_Warning_Flags == 0:   warning_flags='Nothing'                
+                if GS_Single_Warning_Flags == 1:   warning_flags='AC input frequency too high'
+                if GS_Single_Warning_Flags == 2:   warning_flags='AC input frequency too low'               
+                if GS_Single_Warning_Flags == 4:   warning_flags='AC input voltage too low'
+                if GS_Single_Warning_Flags == 8:   warning_flags='AC input voltage too high'               
+                if GS_Single_Warning_Flags == 16:  warning_flags='AC input current exceeds max'                
+                if GS_Single_Warning_Flags == 32:  warning_flags='Temperature sensor bad' 
+                if GS_Single_Warning_Flags == 64:  warning_flags='Communications error'               
+                if GS_Single_Warning_Flags == 128: warning_flags='Cooling fan fault'                
+
+                # GS data - JSON preparation
+                devices_array={
+                  "address": address,
+                  "device_id": 5,
+                  "inverter_L1_current": gs_single_inverter_output_current,
+                  "buy_L1_current": gs_single_inverter_buy_current,
+                  "charge_L1_current": gs_single_inverter_charge_current,
+                  "ac_input_L1_voltage": gs_single_ac_input_voltage,
+                  "ac_output_L1_voltage": gs_single_output_ac_voltage,
+                  "sell_L1_current": GS_Single_Inverter_Sell_Current,
+                  "inverter_L2_current": gs_single_inverter_l2_output_current,
+                  "buy_L2_current": gs_single_inverter_buy_l2_current,
+                  "charge_L2_current": gs_single_inverter_charge_l2_current,
+                  "ac_input_L2_voltage": gs_single_ac_input_l2_voltage,
+                  "ac_output_L2_voltage": gs_single_output_ac_l2_voltage,
+                  "sell_L2_current": GS_Single_Inverter_Sell_l2_Current,                  
+                  "operational_mode": operating_modes,
+                  "transformator_L_temperature": GS_Single_L_Module_Transformer_Temperature,
+                  "capacitors_L_temperature": GS_Single_L_Module_Capacitor_Temperature,
+                  "fet_L_temperature": GS_Single_L_Module_FET_Temperature,
+                  "transformator_R_temperature": GS_Single_R_Module_Transformer_Temperature,
+                  "capacitors_R_temperature": GS_Single_R_Module_Capacitor_Temperature,
+                  "fet_R_temperature": GS_Single_R_Module_FET_Temperature,
+                  "error_modes": [
+                    error_flags
+                  ],
+                  "ac_mode": ac_use,
+                  "battery_voltage":gs_single_battery_voltage,
+                  "aux_relay":aux_relay,
+                  "warning_modes": [
+                    warning_flags
+                  ],
+                  "label":device_list[port]}
+                devices.append(devices_array)     # append FXR data to devices
+                
+                # GS data - MQTT preparation   
+                mqtt_devices.append({
+                             "outback/inverters/" + str(inverters) + "/inverter_L1_current":gs_single_inverter_output_current,
+                             "outback/inverters/" + str(inverters) + "/charge_L1_current"  :gs_single_inverter_charge_current,
+                             "outback/inverters/" + str(inverters) + "/buy_L1_current"     :gs_single_inverter_buy_current,
+                             "outback/inverters/" + str(inverters) + "/sell_L1_current"    :GS_Single_Inverter_Sell_Current,
+                             "outback/inverters/" + str(inverters) + "/inverter_L2_current":gs_single_inverter_l2_output_current,
+                             "outback/inverters/" + str(inverters) + "/charge_L2_current"  :gs_single_inverter_charge_l2_current,
+                             "outback/inverters/" + str(inverters) + "/buy_L2_current"     :gs_single_inverter_buy_l2_current,
+                             "outback/inverters/" + str(inverters) + "/sell_L2_current"    :GS_Single_Inverter_Sell_l2_Current,
+                             "outback/inverters/" + str(inverters) + "/battery_voltage" :gs_single_battery_voltage,
+                             "outback/inverters/" + str(inverters) + "/battery_voltage_compensated" :gs_single_temp_compensated_target_voltage,
+                             "outback/inverters/" + str(inverters) + "/ac_input_L1"        :gs_single_ac_input_voltage,
+                             "outback/inverters/" + str(inverters) + "/ac_output_L1"       :gs_single_output_ac_voltage,
+                             "outback/inverters/" + str(inverters) + "/ac_input_L1"        :gs_single_ac_input_l2_voltage,
+                             "outback/inverters/" + str(inverters) + "/ac_output_L2"       :gs_single_output_ac_l2_voltage,
+                             "outback/inverters/" + str(inverters) + "/ac_use"          :ac_use,
+                             "outback/inverters/" + str(inverters) + "/operating_modes" :operating_modes,
+                             "outback/inverters/" + str(inverters) + "/aux_relay"       :aux_relay,
+                             "outback/inverters/" + str(inverters) + "/error_flags"     :error_flags,
+                             "outback/inverters/" + str(inverters) + "/warning_modes"   :warning_flags,
+                             "outback/inverters/" + str(inverters) + "/trafo_L_temp"      :GS_Single_L_Module_Transformer_Temperature,
+                             "outback/inverters/" + str(inverters) + "/capacitor_L_temp"  :GS_Single_L_Module_Capacitor_Temperature,
+                             "outback/inverters/" + str(inverters) + "/fet_L_temp"        :GS_Single_L_Module_FET_Temperature,
+                             "outback/inverters/" + str(inverters) + "/trafo_R_temp"      :GS_Single_R_Module_Transformer_Temperature,
+                             "outback/inverters/" + str(inverters) + "/capacitor_R_temp"  :GS_Single_R_Module_Capacitor_Temperature,
+                             "outback/inverters/" + str(inverters) + "/fet_R_temp"        :GS_Single_R_Module_FET_Temperature                             
+                             })
+      
+        except Exception as e:
+            logger.warning("port: " + str(port) + " FXR module " + str(e))
+
         try:        
             if "Single Phase Radian Inverter Real Time Block" in blockResult['DID']:
-                logger.debug(".. Detected a Single Phase Radian Inverter Real Time Block" + " -Registry:"+str(reg))
+                logger.debug(".. Detected a Single Phase Radian Inverter Real Time Block")
                 inverters = inverters + 1
                 response = client.read_holding_registers(reg + 2, count=1)
                 port=(response.registers[0]-1)
@@ -992,7 +1225,9 @@ while True:
         json_data={"time":time, "devices":devices, "summary":summary, "various":various}
         with open(os.path.join(output_path, 'mate_status.json'), 'w') as outfile:
             json.dump(json_data, outfile)
+        
         if duplicate_active == 'true':
+            print(duplicate_active)
             #shutil.copy(os.path.join(output_path, 'mate_status.json'), os.path.join(duplicate_path, 'mate_status.json'))      #copy the file in second location
             shutil.copy(os.path.join(output_path, 'mate_status.json'), os.path.join(duplicate_path, 'mate_status.json'))
         json_run = datetime.now()                                                           
@@ -1006,15 +1241,21 @@ while True:
     # MQTT send data to MQTT broker
     try:
         if MQTT_active=='true':
+            MQTT_auth = None 
+            if len(MQTT_username) > 0:
+                MQTT_auth = { 'username': MQTT_username, 'password': MQTT_password }
+                
+            messages = []
             for mqtt_data in mqtt_devices:
-                for topic in mqtt_data:
-                    publish.single(topic, mqtt_data[topic], hostname=MQTT_broker)
-                    
-        ## send overall json data via MQTT                                                  
-        state_topic = "outback/mate"                                   
-        message     = json.dumps(json_data)                                         
-        publish.single(state_topic, message, hostname=MQTT_broker)                    
+                for topic, payload in mqtt_data.items():
+                    messages.append((topic, payload, 0, True))  # QoS=0, retain=True
 
+            topic = "outback/mate" 
+            payload = json.dumps(json_data)
+            messages.append((topic, payload, 0, True))
+            
+            publish.multiple(messages, hostname=MQTT_broker, port=MQTT_port, auth=MQTT_auth)
+        
         mqtt_run = datetime.now()                                                   
         running_time = round ((mqtt_run - json_run).total_seconds(),3)              
         print("running time MQTT:       ",format(running_time,".3f"), " sec")        
