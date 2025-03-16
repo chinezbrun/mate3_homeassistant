@@ -43,7 +43,6 @@ ReadMateStatus version history:
 0.11.0_20250312 - new: support for Radian GS8048 (w/o SQL)
                   new: MQTT authentication
                   improvement: MQTT efficiency 
-
 ------------------------------------------------------------------------------------------------------------------------
 ChangeMateStatus version history:
 =====================================
@@ -75,3 +74,4 @@ ChangeMateStatus version history:
 0.9.0_20250125 - fix - pymodbus <=3.8.3 compatibility, bugfix, anticipate 3.9.0 removal of 'BinaryPayloadDecoder'
                  refactoring: output data directories, scripts alignment RMS-CMS, common config file RMS-CMS
                  new: new events logging
+0.9.1_20250316 - various logging bugfix and improvements
