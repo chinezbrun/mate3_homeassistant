@@ -8,7 +8,7 @@ from pymodbus.constants import Endian
 from configparser import ConfigParser
 import sys, os
 
-script_ver = "0.9.0_20250126"
+script_ver = "0.9.1_20250316"
 print ("script version   : "+ script_ver)
 
 pathname          = os.path.dirname(sys.argv[0])
@@ -59,6 +59,30 @@ OutbackBlock_flag               = 0
 InverterConfigurationBlock_flag = 0
 OutbackSystemControlBlock_flag  = 0
 
+# Creează un logger
+logger = logging.getLogger("outback")
+logger.setLevel(LOGGING_LEVEL_FILE)  # Setează nivelul minim de logare
+
+# Handler pentru consolă
+console_handler = logging.StreamHandler()
+console_handler.setLevel(LOGGING_LEVEL_FILE)
+#formater
+console_formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s', datefmt='%Y%m%d %H:%M:%S')
+console_handler.setFormatter(console_formatter)
+
+# merge paths to use proper separators windows or Linux
+log_path = os.path.join(working_dir, 'data', 'events_cms.log')
+file_handler = RotatingFileHandler(log_path , mode='a', maxBytes=LOGGING_FILE_MAX_SIZE*1000, backupCount=LOGGING_FILE_MAX_FILES, encoding=None, delay=False)
+file_handler.setLevel(LOGGING_LEVEL_FILE)
+
+#formater
+file_formatter = logging.Formatter('%(asctime)s| CMS |%(levelname)8s| %(message)s ',datefmt='%Y%m%d %H:%M:%S') 
+file_handler.setFormatter(file_formatter)
+
+# Adaugă handler-ele la logger
+logger.addHandler(console_handler)
+logger.addHandler(file_handler)
+
 def blankjsonfile():
     mate_input = {
     "time_posted":str(curent_date_time.strftime("%Y-%m-%d %H:%M:%S")), 
@@ -100,12 +124,12 @@ def blankjsonfile():
     json_path = os.path.join(output_path, 'mate_input.json')
     with open(json_path, 'w') as outfile:
         json.dump(mate_input, outfile, indent=1)
-    print("multiple input json file created")
+    logger.info("multiple input json file created")
     
 # prepare the bulk parameters to be writen 
 if output_path != "none":
     try:
-        mate_input                         = json.load(open(output_path + '/mate_input.json'))
+        mate_input                           = json.load(open(output_path + '/mate_input.json'))
         Sched_1_AC_Mode_local                = mate_input["OutbackBlock"]["outback_schedule"]["sched_1_ac_mode"]
         OutBack_Sched_1_AC_Mode_Hour_local   = mate_input["OutbackBlock"]["outback_schedule"]["sched_1_ac_mode_hour"]
         OutBack_Sched_1_AC_Mode_Minute_local = mate_input["OutbackBlock"]["outback_schedule"]["sched_1_ac_mode_minute"]
@@ -122,71 +146,45 @@ if output_path != "none":
         OB_Charge_Enable_Disable_local       = mate_input["OutbackSystemControlBlock"]["Charge_Enable_Disable"]
         OutbackSystemControlBlock_flag       = mate_input["OutbackSystemControlBlock"]["OutbackSystemControlBlock_flag"]
     except Exception as e:
-        print("multiple input json file not found " + str(e))
+        logger.warning ("multiple input json file not found " + str(e))
         blankjsonfile()
         
 print ("working directory: " +  working_dir)
 print ("output path      : " + output_path)
 print ("variables initialization completed")
 
-# Creează un logger
-logger = logging.getLogger("outback")
-logger.setLevel(LOGGING_LEVEL_FILE)  # Setează nivelul minim de logare
-
-# Handler pentru consolă
-console_handler = logging.StreamHandler()
-console_handler.setLevel(LOGGING_LEVEL_FILE)
-#formater
-console_formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s', datefmt='%Y%m%d %H:%M:%S')
-console_handler.setFormatter(console_formatter)
-
-# merge paths to use proper separators windows or Linux
-log_path = os.path.join(working_dir, 'data', 'events_cms.log')
-file_handler = RotatingFileHandler(log_path , mode='a', maxBytes=LOGGING_FILE_MAX_SIZE*1000, backupCount=LOGGING_FILE_MAX_FILES, encoding=None, delay=False)
-file_handler.setLevel(LOGGING_LEVEL_FILE)
-
-#formater
-file_formatter = logging.Formatter('%(asctime)s| CMS |%(levelname)8s| %(message)s ',datefmt='%Y%m%d %H:%M:%S') 
-file_handler.setFormatter(file_formatter)
-
-# Adaugă handler-ele la logger
-logger.addHandler(console_handler)
-logger.addHandler(file_handler)
-
 # if external python arguments provided - this has priority, specific mate_input parameter will be overwriten
 if len(sys.argv) > 1:
     
-    logger.debug("..'argument received ", sys.argv[1])
+    logger.debug(".. argument received: " + str(sys.argv[1]))
     
     if sys.argv[1] == 'On' or sys.argv[1] == 'Off':
         Charger_Operating_Mode_local    = sys.argv[1] # new value received 
         OutbackBlock_flag = 0                         
         OutbackSystemControlBlock_flag  = 0
         InverterConfigurationBlock_flag = 1
-        logger.debug("..'Charger_Operating_Mode_local' was overwritten: ", Charger_Operating_Mode_local)
-        print("..'Charger_Operating_Mode_local' was overwritten: ", Charger_Operating_Mode_local)
+        logger.debug(".. Charger_Operating_Mode_local was overwritten: " + str(Charger_Operating_Mode_local))
     
     if sys.argv[1] in ACmode_list:
         Grid_Input_Mode_local           = sys.argv[1] # new value received 
         OutbackBlock_flag = 0                        
         OutbackSystemControlBlock_flag  = 0
         InverterConfigurationBlock_flag = 1
-        logger.debug("..'Grid_Input_Mode_local' was overwritten: ", Grid_Input_Mode_local)
-        print("..'Grid_Input_Mode_local' was overwritten: ", Grid_Input_Mode_local)
+        logger.debug(".. Grid_Input_Mode_local was overwritten: " + str(Grid_Input_Mode_local))
     
     if sys.argv[1] in Charge_Enable_Disable_list:
         OB_Charge_Enable_Disable_local  = sys.argv[1] # new value received 
         OutbackBlock_flag = 0                         
         InverterConfigurationBlock_flag = 0
         OutbackSystemControlBlock_flag  = 1
-        logger.debug("..'OB_Charge_Enable_Disable_local' was overwritten: ", OB_Charge_Enable_Disable_local)
-        print("..'OB_Charge_Enable_Disable_local' was overwritten: ", OB_Charge_Enable_Disable_local)       
+        logger.debug(".. OB_Charge_Enable_Disable_local was overwritten: " + str(OB_Charge_Enable_Disable_local))
+    
 else:
     logger.debug(".. no argument received")
     
 if (OutbackSystemControlBlock_flag+InverterConfigurationBlock_flag+OutbackBlock_flag) == 0:
-    logger.debug(".. nothing to write")
-    print(".. nothing to write, exiting")
+    logger.info (".. nothing to write")
+    print(".. done ")
     exit()
 # =================================== ModbusMate subroutines & variables =====================================
 # Define the dictionary mapping SUNSPEC DID's to Outback names
@@ -306,7 +304,7 @@ def getSunSpec(basereg):
     if "OUTBACK_POWER" in str(manufacturer.upper()):
         logger.debug(".. Outback Power device found")
     else:
-        logger.debug(".. Not an Outback Power device. Detected " + manufacturer)
+        logger.debug(".. Not an Outback Power device. Detected " + str(manufacturer))
         return None
     try:
         register = client.read_holding_registers(basereg + 3)
@@ -321,6 +319,7 @@ def getBlock(basereg):
     except:
         return None
     blockID = int(register.registers[0])
+    
     # Peek at block style
     try:
         register = client.read_holding_registers(basereg + 1)
@@ -328,12 +327,13 @@ def getBlock(basereg):
         return None
     blocksize = int(register.registers[0])
     blockname = None
+    
     try:
         blockname = mate3_did[blockID]
     except:
-        print("ERROR: Unknown device type with DID=" + str(blockID))
+        logger.debug(".. Unknown device type with DID=" + str(blockID))
     return {"size": blocksize, "DID": blockname}
-# 
+
 def OutbackBlock():
     loop = 0
     while loop < 3 :
@@ -467,17 +467,20 @@ def OutbackBlock():
             break
         else:
             loop = loop + 1
-            logger.debug(".... verification loop " +  str(loop))
-
-    if  mate_input["OutbackBlock"]["OutbackBlock_flag"] == 0:
-        logger.debug(".... verification completed: all good")
-        logger.info("update schedule: " +\
+            logger.debug(".... writing verification loop: " +  str(loop))
+            
+    if Sched_1_AC_Mode_flag == 0 and Sched_1_AC_Mode_Hour_flag == 0 and\
+   Sched_2_AC_Mode_flag == 0 and Sched_2_AC_Mode_Hour_flag == 0 and\
+   Sched_3_AC_Mode_flag == 0 and Sched_3_AC_Mode_Hour_flag == 0:      
+    #if  mate_input["OutbackBlock"]["OutbackBlock_flag"] == 0:
+        logger.debug(".... update verification: all good")
+        logger.info("schedule changed to: " +\
                  str(OutBack_Sched_1_AC_Mode_Hour) + ":" + str(OutBack_Sched_1_AC_Mode_Minute) + " " + str(Sched_1_AC_Mode) + " "+\
                  str(OutBack_Sched_2_AC_Mode_Hour) + ":" + str(OutBack_Sched_2_AC_Mode_Minute) + " " + str(Sched_2_AC_Mode) + " "+\
                  str(OutBack_Sched_3_AC_Mode_Hour) + ":" + str(OutBack_Sched_3_AC_Mode_Minute) + " " + str(Sched_3_AC_Mode))
 
     else:
-        logger.debug(".... update verification failed")
+        logger.debug(".... writing verification: failed")
     
     mate_input["time_taken"] = str(curent_date_time.strftime("%Y-%m-%d %H:%M:%S"))
     
@@ -492,11 +495,11 @@ def OutbackSystemControlBlock():
     while loop <= 3 :
         response = client.read_holding_registers(reg + 5, count=1)
         OB_Charge_Enable_Disable = int(response.registers[0])
-        logger.debug(".... Curent charging mode " + Charge_Enable_Disable_list[OB_Charge_Enable_Disable])
+        logger.debug(".... Charging Mode: " + str(Charge_Enable_Disable_list[OB_Charge_Enable_Disable]))
         
         if OB_Charge_Enable_Disable_local in Charge_Enable_Disable_list and OB_Charge_Enable_Disable_local != Charge_Enable_Disable_list[OB_Charge_Enable_Disable]:
             rw = client.write_register(reg + 5, Charge_Enable_Disable_list.index(OB_Charge_Enable_Disable_local))
-            logger.info("updating charging mode to: " + OB_Charge_Enable_Disable_local)
+            logger.debug(".... updating Charging Mode to: " + str(OB_Charge_Enable_Disable_local))
             Charge_Enable_Disable_flag = 1
         else:    
             Charge_Enable_Disable_flag = 0
@@ -507,12 +510,14 @@ def OutbackSystemControlBlock():
             break
         else:
             loop = loop + 1
-            logger.debug(".... update verification loop " +  str(loop))
-
-    if mate_input["OutbackSystemControlBlock"]["OutbackSystemControlBlock_flag"] == 0:
-        logger.debug(".... verification completed: all good")
+            logger.debug(".... writing verification loop " +  str(loop))
+            
+    if Charge_Enable_Disable_flag == 0:        
+    #if mate_input["OutbackSystemControlBlock"]["OutbackSystemControlBlock_flag"] == 0:
+        logger.debug(".... writing verification: all good")
+        logger.info("Charging Mode changed to: " + str(OB_Charge_Enable_Disable_local))
     else:
-        logger.warning(".... update verification failed")
+        logger.debug(".... writing verification: failed")
         
     mate_input["time_taken"] = str(curent_date_time.strftime("%Y-%m-%d %H:%M:%S"))
     
@@ -524,23 +529,27 @@ def OutbackSystemControlBlock():
 
 def RadianInverterConfigurationBlock():
     loop = 0
+    Charger_Operating_Mode_flag_log = 0
+    Grid_Input_Mode_flag_log = 0
     while loop <= 3 :
         #GSconfig_Charger_Operating_Mode
         response = client.read_holding_registers(reg + 24, count=1)
         GSconfig_Charger_Operating_Mode = int(response.registers[0])
-        logger.debug(".... FXR Charger Mode " + str(GSconfig_Charger_Operating_Mode))
-        
+                
         Charger_Operating_Mode='None'
         if GSconfig_Charger_Operating_Mode == 0:   Charger_Operating_Mode ='Off'
         if GSconfig_Charger_Operating_Mode == 1:   Charger_Operating_Mode ='On'
+        
+        logger.debug(".... inverter Charger Mode: " + str(Charger_Operating_Mode))
         
         if Charger_Operating_Mode_local != "notset" and Charger_Operating_Mode != Charger_Operating_Mode_local:
             if Charger_Operating_Mode_local == 'On':   GSconfig_Charger_Operating_Mode_SC = 1
             if Charger_Operating_Mode_local == 'Off':  GSconfig_Charger_Operating_Mode_SC = 0
             rw = client.write_register(reg + 24, GSconfig_Charger_Operating_Mode_SC)
             Charger_Operating_Mode = GSconfig_Charger_Operating_Mode_SC
-            logger.info("updating AC charging to: " + str(Charger_Operating_Mode_local))
+            logger.debug(".... updating inverter Charger Mode to: " + str(Charger_Operating_Mode_local))
             Charger_Operating_Mode_flag = 1
+            Charger_Operating_Mode_flag_log = 1
         else:    
             Charger_Operating_Mode_flag = 0
             mate_input["RadianInverterConfigurationBlock"]["charger_operating_mode"] = "notset"
@@ -548,12 +557,13 @@ def RadianInverterConfigurationBlock():
         # GSconfig_Grid_Input_Mode
         response = client.read_holding_registers(reg + 26, count=1)
         GSconfig_Grid_Input_Mode = int(response.registers[0])
-        logger.debug(".... FXR Input mode " + ACmode_list[GSconfig_Grid_Input_Mode])
+        logger.debug(".... inverter Grid Input mode: " + str(ACmode_list[GSconfig_Grid_Input_Mode]))
         
         if Grid_Input_Mode_local in ACmode_list and GSconfig_Grid_Input_Mode != ACmode_list.index(Grid_Input_Mode_local):                    
             rw = client.write_register(reg + 26, ACmode_list.index(Grid_Input_Mode_local))
-            logger.info("updating AC Mode to: " + Grid_Input_Mode_local)
+            logger.debug(".... updating inverter Grid Input mode to: " + str(Grid_Input_Mode_local))
             Grid_Input_Mode_flag = 1
+            Grid_Input_Mode_flag_log = 1
         else:    
             Grid_Input_Mode_flag = 0
             mate_input["RadianInverterConfigurationBlock"]["grid_input_mode"] = "notset"
@@ -563,12 +573,18 @@ def RadianInverterConfigurationBlock():
             break
         else:
             loop = loop + 1
-            logger.debug(".... update verification loop " +  str(loop))
-    
-    if mate_input["RadianInverterConfigurationBlock"]["InverterConfigurationBlock_flag"] == 0:
-        logger.debug(".... verification completed: all good")
+            logger.debug(".... writing verification loop " +  str(loop))
+            
+    if Grid_Input_Mode_flag == 0 and Charger_Operating_Mode_flag == 0:
+    #if mate_input["RadianInverterConfigurationBlock"]["InverterConfigurationBlock_flag"] == 0:
+        logger.debug(".... writing verification: all good")
+        if Charger_Operating_Mode_flag_log == 1:
+            logger.info("inverter Charger Mode changed to: " + str(Charger_Operating_Mode_local))
+        if Grid_Input_Mode_flag_log == 1:
+            logger.info("inverter Grid Input mode changed to: " + str(Grid_Input_Mode_local))
+        
     else:
-        logger.warning(".... update verification failed")
+        logger.debug(".... writing verification: failed")
         
     mate_input["time_taken"] = str(curent_date_time.strftime("%Y-%m-%d %H:%M:%S"))
     
@@ -578,8 +594,7 @@ def RadianInverterConfigurationBlock():
 
     return 
 
-def FLEXnetDCRealTimeBlock():
-    logger.debug(".. Detect a FLEXnet-DC Real Time Block")  
+def FLEXnetDCRealTimeBlock():     
     return
  
 # =======================================This is the main loop =====================================
@@ -599,12 +614,12 @@ try:
     reg    = sunspec_start_reg
     size   = getSunSpec(reg)
     if size is None:
-        logger.debug("We have failed to detect an Outback system. Exciting")
+        logger.error("We have failed to detect an Outback system. Exciting")
         client.close()
         exit()
 except Exception as e:
     client.close()
-    logger.error(".. Failed to connect to MATE3. Enable SUNSPEC and check port. Exciting"+ str(e))
+    logger.error(".. Failed to connect to MATE3. Enable SUNSPEC and check port. Exiting"+ str(e))
     exit()
 
 logger.debug(".. Connected OK to an Outback system")
@@ -618,26 +633,28 @@ while True:
         blockResult = getBlock(reg)
         
         if "Outback block" in blockResult['DID']:
-            logger.debug(".. Detected a Outback Block")
+            logger.debug(".. Detected Outback Block")
             if OutbackBlock_flag == 1: OutbackBlock()
             
         if "Outback System Control Block" in blockResult['DID']:
-            logger.debug(".. Detected a Outback System Control Block")
+            logger.debug(".. Detected Outback System Control Block")
             if OutbackSystemControlBlock_flag == 1: OutbackSystemControlBlock()
             
         if "Radian Inverter Configuration Block" in blockResult['DID']: 
-            logger.debug(".. Detected a FXR inverter")
+            logger.debug(".. Detected Radian Inverter Configuration Block")
             if InverterConfigurationBlock_flag == 1: RadianInverterConfigurationBlock()
 
-        if "FLEXnet-DC Real Time Block" in blockResult['DID']: FLEXnetDCRealTimeBlock()
-        
+        if "FLEXnet-DC Real Time Block" in blockResult['DID']:
+            logger.debug(".. Detect FLEXnet-DC Real Time Block") 
+            FLEXnetDCRealTimeBlock()
+
         if "End of SunSpec" not in blockResult['DID']:
             reg = reg + blockResult['size'] + 2
         else:
             break
 
     if loop >0:
-        logger.debug(".. update verification completed in " + str(loop) +" loop: all good")
+        logger.debug(".. Update verification completed in " + str(loop) +" loop: all good")
 
     client.close()
     logger.debug(".. Mate connection closed ")
@@ -645,6 +662,6 @@ while True:
     print(".. done ")
     end_run = datetime.now()                                                 
     running_time = round ((end_run - start_run).total_seconds(),3)           
-    print("response time Mate3:    ",format(running_time,".3f")," sec")       
+    print("Mate response time:    ",format(running_time,".3f")," sec")       
 
     break           
