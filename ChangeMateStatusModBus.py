@@ -4,11 +4,10 @@ import json
 import time
 from datetime import datetime
 from pymodbus.client import ModbusTcpClient as ModbusClient
-from pymodbus.constants import Endian
 from configparser import ConfigParser
 import sys, os
 
-script_ver = "0.9.1_20250316"
+script_ver = "0.9.2_20251006"
 print ("script version   : "+ script_ver)
 
 pathname          = os.path.dirname(sys.argv[0])
