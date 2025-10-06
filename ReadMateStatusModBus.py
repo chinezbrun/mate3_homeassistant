@@ -5,13 +5,12 @@ from logging.handlers import RotatingFileHandler
 import mysql.connector as mariadb
 from datetime import datetime
 from pymodbus.client import ModbusTcpClient as ModbusClient
-from pymodbus.constants import Endian
 from configparser import ConfigParser
 import paho.mqtt.publish as publish
 import shutil  
 import sys, os
 
-script_ver = "0.11.0_20250312"
+script_ver = "0.11.1_20251006"
 print ("script version: "+ script_ver)
 
 pathname               = os.path.dirname(sys.argv[0])
