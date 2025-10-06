@@ -1,3 +1,5 @@
 20250126 12:03:19| CMS | WARNING| multiple input json file not found [Errno 2] No such file or directory: '\\\\192.168.0.100\\web\\mate3_homeassistant\\data/mate_input.json' 
 20250126 12:03:19| CMS |    INFO| multiple input json file created 
-20250126 13:03:35| CMS |    INFO| update schedule: 16:0 Disabled 16:0 Disabled 16:0 Backup 
+20250126 13:03:35| CMS |    INFO| update schedule: 16:0 Disabled 16:0 Disabled 16:0 Backup 20250316 16:13:48| CMS |    INFO| .. nothing to write 
+20251006 21:53:07| CMS |    INFO| .. nothing to write 
+
