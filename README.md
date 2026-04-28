@@ -1,8 +1,8 @@
 # OutBackPower Mate3 integration with Home Assistant
 
 ![Home Assistant](/docs/HomeAssistant/example_ha_sunsynk-power-flow-card.png)  
-![card](/docs/HomeAssistant/example_ha_outback_stat.png)  
-![card](/docs/HomeAssistant/example_ha_outback_config.png)
+![card](/docs/HomeAssistant/example_ha_outback_stat_card.png)  
+![card](/docs/HomeAssistant/example_ha_outback_config_card.png)
 ---
 # How Does This Software Work?
 This integration is based on:
