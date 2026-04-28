@@ -1,0 +1,46 @@
+##script 1 - start Bulk
+
+alias: Solar - Start Bulk
+mode: single
+sequence:
+  - action: script.solar_start_bulk
+    data: {}
+  - data:
+      message: Solar - Start Bulk
+    action: notify.mobile_app_iphone_chinezbrun
+
+#---------------------------------------------------
+##script 2 - start Bulk
+
+alias: Solar - Stop Bulk
+mode: single
+sequence:
+  - action: script.solar_stop_bulk
+    data: {}
+  - data:
+      message: Solar - Stop Bulk
+    action: notify.mobile_app_iphone_chinezbrun
+
+#---------------------------------------------------
+##script 3 - start EQ
+
+alias: Solar - Start EQ
+mode: single
+sequence:
+  - action: script.solar_start_eq
+    data: {}
+  - data:
+      message: Equilibration started
+    action: notify.mobile_app_iphone_chinezbrun
+
+#---------------------------------------------------
+##script 4 - stop EQ
+
+alias: Solar - Stop EQ
+mode: single
+sequence:
+  - action: script.solar_stop_eq
+    data: {}
+  - data:
+      message: Equilibration stopped
+    action: notify.mobile_app_iphone_chinezbrun
