@@ -26,7 +26,7 @@ This integration is based on:
 - `ChangeMateStatusModBus.py` can write ModBus data to MATE3. A limited set of parameters can be modified.  
 - The script accepts arguments to indicate the parameters to be changed. It can also change multiple parameters during a single run.  
 - More details can be found [here](/docs/ChangeMate_Status/ChangeMateStatusInstructions.txt).  
-- Automation in Home Assistant can be achieved using [shell commands](https://www.home-assistant.io/integrations/shell_command/). Examples are below and in the documentation folder [here](/docs/HomeAssistant/).
+- Automation in Home Assistant can be achieved using [shell commands](https://www.home-assistant.io/integrations/shell_command/). Examples are in the documentation folder [here](/docs/HomeAssistant/example_shell_command_usage_yaml.txt).
 ---
 # Home Assistant Configuration
 - A new folder named `data` should be created in the `www` folder located in Home Assistant (e.g., `\home-assistant\www\data`). This folder is where the JSON file will be saved by RMS.
