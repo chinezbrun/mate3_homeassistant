@@ -1,0 +1,79 @@
+cards:
+  - cards:
+      - hold_action:
+          action: more-info
+        name: Start EQ
+        show_icon: true
+        show_name: true
+        show_state: false
+        tap_action:
+          action: call-service
+          confirmation:
+            text: Are you sure you want to press this button?
+          exemptions:
+            - user: chinezbrun
+          service: script.solar_start_eq
+        type: button
+      - hold_action:
+          action: more-info
+        name: Stop EQ
+        show_icon: true
+        show_name: true
+        show_state: false
+        tap_action:
+          action: call-service
+          service: script.solar_stop_eq
+        type: button
+      - hold_action:
+          action: more-info
+        name: Start Bulk
+        show_icon: true
+        show_name: true
+        show_state: false
+        tap_action:
+          action: call-service
+          confirmation:
+            text: Are you sure you want to press this button?
+          exemptions:
+            - user: chinezbrun
+          service: script.solar_start_bulk
+        type: button
+      - hold_action:
+          action: more-info
+        name: Stop Bulk
+        show_icon: true
+        show_name: true
+        show_state: false
+        tap_action:
+          action: call-service
+          service: script.solar_stop_bulk
+        type: button
+    type: horizontal-stack
+  - type: entities
+    entities:
+      - entity: sensor.outback_grid_input_mode
+        icon: none
+        name: Actual Grid Mode
+      - entity: input_select.solar_grid_input_mode
+        name: Change Grid MODE
+      - entity: sensor.outback_charger_mode
+        name: Actual Inverter Charger MODE
+        icon: none
+      - entity: input_select.solar_charger_mode
+        name: Change Inverter Charger MODE
+    state_color: true
+  - show_name: true
+    show_icon: false
+    hold_action:
+      action: more-info
+    icon_height: 0px
+    name: Trigger CHANGE MATE STATUS
+    tap_action:
+      action: call-service
+      service: shell_command.script_outback_change_grid_input_mode
+      target: {}
+    theme: default
+    type: button
+    entity: binary_sensor.ping_mate3s
+    show_state: true
+type: vertical-stack
