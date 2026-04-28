@@ -29,7 +29,8 @@ This integration is based on:
 - Automation in Home Assistant can be achieved using [shell commands](https://www.home-assistant.io/integrations/shell_command/). Examples are in the documentation folder [here](/docs/HomeAssistant/example_shell_command_usage_yaml.txt).
 ---
 # Home Assistant Configuration
-- A new folder named `data` should be created in the `www` folder located in Home Assistant (e.g., `\home-assistant\www\data`). This folder is where the JSON file will be saved by RMS.
+- A new folder named `data` should be created in the `www` directory in Home Assistant (e.g., `/config/www/data`).  
+This path must match the JSON output path defined in `config.cfg`. RMS will save the JSON file to this location.
 
 ## Integration Variants
 ### 1. Automatic: MQTT Auto Discovery (RECOMMENDED)
