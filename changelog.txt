@@ -44,6 +44,10 @@ ReadMateStatus version history:
                   new: MQTT authentication
                   improvement: MQTT efficiency 
 0.11.1_20251006 - fix: pymodbus 3.x.x, HA2025.09 compatibility
+
+1.0.0_20260428  - major: MQTT Auto Discovery (HA), daemon mode, dynamic devices detection, summary metrics; 
+                - refactoring: runtime cycle (connect/read/process/publish/close), 
+                - improvements: improved stability, reconnect each cycle, MQTT/JSON naming, logging, multi-device support
 ------------------------------------------------------------------------------------------------------------------------
 ChangeMateStatus version history:
 =====================================
