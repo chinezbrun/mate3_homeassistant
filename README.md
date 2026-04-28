@@ -49,7 +49,7 @@ MQTT_discovery_active = true
 MQTT_discovery_active = false
 ```
 - Use MQTT Explorer to view the full list of available topics.
-- Examples can be found [here](/docs/ChangeMate_Status/ChangeMateStatusInstructions.txt)
+- Examples can be found [here](/docs/HomeAssistant/examples_ha_mqtt_sensors_manual_configuration.txt)
 ### 3. Manual: JSON File Decoding (FILE integration)
 ```ini
 MQTT_discovery_active = false
