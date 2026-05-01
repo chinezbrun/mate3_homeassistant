@@ -1,5 +1,7 @@
 #!/bin/bash
-# task from local PI
-#/usr/bin/python3 /var/www/html/MonitorMate_mod/DataStreamRelay/ReadMateStatusModBus.py
-# task from NAS 
-/volume1/@appstore/python3/bin/python3 /volume1/web/MonitorMate_mod/DataStreamRelay/ReadMateStatusModBus.py
+# navigate in the directory where python script is placed
+cd /mnt/web/mate3_homeassistant
+# open the script in a separate terminal - better control and visualisation of console's messages
+lxterminal -e python3 ReadMateStatusModBus.py
+# if not just run it 
+#python3 ReadMateStatusModBus.py
