@@ -31,7 +31,6 @@ python ReadMateStatusModbus.py MQTT_active=false MQTT_discovery_active=false
 * Any valid CLI parameter automatically forces run-once mode; therefore, `daemon_active=true` from CLI is ignored
 Default behavior (no CLI args) follows `config.cfg`.
 
----
 ### ReadMateStatusModBus.sh (Optional)
 - This is an example Linux script that can be used to start `ReadMateStatusModBus.py`. The script should run at the desired update frequency (e.g., every minute). Refer to your OS or distribution’s documentation for setting up daemons or scheduled tasks.
 ---
