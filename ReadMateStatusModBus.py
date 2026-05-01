@@ -11,14 +11,67 @@ import shutil
 import sys, os
 import re
 
-script_ver = "1.0.0_20260428"
+script_ver = "1.0.1_20260430"
 print ("script version: "+ script_ver)
 
 pathname               = os.path.dirname(sys.argv[0])
 working_dir            = os.path.abspath(pathname) 
 
+
+# CLI overrides - temporary config overrides from key=value arguments
+CLI_ALLOWED_KEYS = {
+    "daemon_active",
+    "duplicate_active",
+    "MQTT_active",
+    "MQTT_discovery_active",
+    "SQL_active"
+}
+
+# CLI overrides - decoding
+def apply_cli_overrides(cfg):
+    # flag: becomes True if at least one valid CLI parameter is found
+    cli_override_found = False
+
+    for arg in sys.argv[1:]:
+        # accept only key=value format
+        if "=" not in arg:
+            continue
+
+        try:
+            key, value = arg.split("=", 1)
+            key   = key.strip()
+            value = value.strip()
+
+            # allow only whitelisted keys
+            if key not in CLI_ALLOWED_KEYS:
+                continue
+
+            # apply override to all sections containing this key
+            for section in cfg.sections():
+                if cfg.has_option(section, key):
+                    old_value = cfg.get(section, key, fallback=None)
+                    cfg.set(section, key, value)
+                    cli_override_found = True
+
+        except Exception:
+            
+            # silent fallback - do not interrupt execution
+            print("CLI override:            ", cli_override_found, "- key/value not valid")
+            pass
+
+    # if at least one valid CLI parameter was provided:
+    if cli_override_found:
+        
+        cfg.set('General', 'daemon_active', 'false')
+        cfg.set('Path', 'duplicate_active', 'false')
+        
+    print("CLI override:            ", cli_override_found)
+    print("working directory:       ", working_dir)
+    return cfg
+
 config                 = ConfigParser()
 config.read(os.path.join(working_dir, 'config.cfg'))
+config                 = apply_cli_overrides(config)  #CLI overrides - temporary config overrides from key=value arguments
 
 #MATE3 connection
 mate3_ip               = config.get('MATE3 connection', 'mate3_ip')
@@ -49,7 +102,14 @@ MQTT_username          = config.get('MQTT', 'MQTT_username')
 MQTT_password          = config.get('MQTT', 'MQTT_password')
 
 daemon_active          = config.get('General','daemon_active', fallback='false')
-scan_frequency         = int(config.get('General','scan_frequency', fallback='60'))
+
+try:
+    scan_frequency = int(config.get('General','scan_frequency', fallback='60'))
+    if scan_frequency < 10:
+        raise ValueError
+except:
+    print("Too low scan_frequency, fallback to 10 sec")
+    scan_frequency = 10
 
 LOGGING_LEVEL_FILE     = config.get('General','LOGGING_LEVEL_FILE')
 LOGGING_FILE_MAX_SIZE  = int(config.get('General','LOGGING_FILE_MAX_SIZE'))
@@ -60,9 +120,9 @@ print("output location:         ", output_path)
 print("duplicate output active: ", duplicate_active)
 print("SQL active  :            ", SQL_active)
 print("MQTT active :            ", MQTT_active)
-print("MQTT discovery active:    ", MQTT_discovery_active)
-print("daemon active:            ", daemon_active)
-print("scan frequency:           ", scan_frequency, "sec")
+print("MQTT discovery active:   ", MQTT_discovery_active)
+print("daemon active:           ", daemon_active)
+print("scan frequency:          ", scan_frequency, "sec")
 
 ## LOGGER setup
 # Creează un logger
@@ -919,7 +979,7 @@ def main():
                              "outback/inverters/" + str(inverters) + "/battery_voltage_compensated" :gs_single_temp_compensated_target_voltage,
                              "outback/inverters/" + str(inverters) + "/ac_input_L1"        :gs_single_ac_input_voltage,
                              "outback/inverters/" + str(inverters) + "/ac_output_L1"       :gs_single_output_ac_voltage,
-                             "outback/inverters/" + str(inverters) + "/ac_input_L1"        :gs_single_ac_input_l2_voltage,
+                             "outback/inverters/" + str(inverters) + "/ac_input_L2"        :gs_single_ac_input_l2_voltage,
                              "outback/inverters/" + str(inverters) + "/ac_output_L2"       :gs_single_output_ac_l2_voltage,
                              "outback/inverters/" + str(inverters) + "/ac_use"          :ac_use,
                              "outback/inverters/" + str(inverters) + "/operating_modes" :operating_modes,
@@ -1643,30 +1703,34 @@ def main():
                 mycursor.execute(db_devices_sql[n], value)
                 n = n+1
             
-            # summary of the day calculation for MariaDB upload
-            sql="SELECT date,kwh_in,kwh_out,ah_in,max_soc,min_soc FROM monitormate_summary \
-            where date(date)= DATE(NOW())"
+            if not fndc_detected:
+                mydb.commit()
+                logger.debug(" Summary of the day skipped - FNDC not detected")
+            else:
+                # summary of the day calculation for MariaDB upload
+                sql="SELECT date,kwh_in,kwh_out,ah_in,max_soc,min_soc FROM monitormate_summary \
+                where date(date)= DATE(NOW())"
             
-            mycursor = mydb.cursor()
-            mycursor.execute(sql)
-            myresult = mycursor.fetchall()
+                mycursor = mydb.cursor()
+                mycursor.execute(sql)
+                myresult = mycursor.fetchall()
 
-            if not myresult:                                                               # check if any records for today - if not, record for the first time
-                val=(date_now,FN_Todays_NET_Input_kWh,FN_Todays_NET_Output_kWh,FN_Todays_NET_Input_AH,FN_Todays_NET_Output_AH,FN_Todays_Maximum_SOC,FN_Todays_Minimum_SOC)
-                sql="INSERT INTO monitormate_summary (date,kwh_in,kwh_out,ah_in,ah_out,max_soc,min_soc)\
-                VALUES (%s,%s,%s,%s,%s,%s,%s)"
-                mycursor = mydb.cursor()
-                mycursor.execute(sql, val)
-                mydb.commit()
-                logger.debug(" Summary of the day - first record completed")
-            else:                                                                           # if records - update table
-                val=(FN_Todays_NET_Input_kWh,FN_Todays_NET_Output_kWh,FN_Todays_NET_Input_AH,FN_Todays_NET_Output_AH,
-                     FN_Todays_Maximum_SOC,FN_Todays_Minimum_SOC,date_now)
-                sql="UPDATE monitormate_summary SET kwh_in=%s,kwh_out=%s,ah_in=%s,ah_out=%s,\
-                max_soc=%s,min_soc=%s WHERE date=%s"
-                mycursor = mydb.cursor()
-                mycursor.execute(sql, val)
-                mydb.commit()
+                if not myresult:                                                               # check if any records for today - if not, record for the first time
+                    val=(date_now,FN_Todays_NET_Input_kWh,FN_Todays_NET_Output_kWh,FN_Todays_NET_Input_AH,FN_Todays_NET_Output_AH,FN_Todays_Maximum_SOC,FN_Todays_Minimum_SOC)
+                    sql="INSERT INTO monitormate_summary (date,kwh_in,kwh_out,ah_in,ah_out,max_soc,min_soc)\
+                    VALUES (%s,%s,%s,%s,%s,%s,%s)"
+                    mycursor = mydb.cursor()
+                    mycursor.execute(sql, val)
+                    mydb.commit()
+                    logger.debug(" Summary of the day - first record completed")
+                else:                                                                           # if records - update table
+                    val=(FN_Todays_NET_Input_kWh,FN_Todays_NET_Output_kWh,FN_Todays_NET_Input_AH,FN_Todays_NET_Output_AH,
+                         FN_Todays_Maximum_SOC,FN_Todays_Minimum_SOC,date_now)
+                    sql="UPDATE monitormate_summary SET kwh_in=%s,kwh_out=%s,ah_in=%s,ah_out=%s,\
+                    max_soc=%s,min_soc=%s WHERE date=%s"
+                    mycursor = mydb.cursor()
+                    mycursor.execute(sql, val)
+                    mydb.commit()
                 
             mycursor.close()
             mydb.close()
