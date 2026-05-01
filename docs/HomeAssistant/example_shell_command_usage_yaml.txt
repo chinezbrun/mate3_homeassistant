@@ -2,14 +2,16 @@
 # input_select with desired arguments should be prior defined in Home Assistant
 # Shell Command provides variable input parameters to ChangeMateStatusModBus.py via input_select
 # Shell Command provides fix paramets to ChangeMateStatusModBus.py (i.e StartBulk) 
+# Shell Command provides fix parameters to ReadMateStatusModBus.py -- useful for automation, run-once to force quick updates
 
 # YAML 
-shell_command:
-  script_outback_change_grid_input_mode: "python3 /media/web/mate3_homeassistant/ChangeMateStatusModBus.py {{states.input_select.solar_grid_input_mode.state}}"
-  script_outback_change_charger_mode: "python3 /media/web/mate3_homeassistant/ChangeMateStatusModBus.py {{states.input_select.solar_charger_mode.state}}" 
+shell_command:  
+  outback_change_grid_input_mode: "python3 /media/web/mate3_homeassistant/ChangeMateStatusModBus.py {{states.input_select.solar_grid_input_mode.state}}"
+  outback_change_charger_mode: "python3 /media/web/mate3_homeassistant/ChangeMateStatusModBus.py {{states.input_select.solar_charger_mode.state}}"
+  outback_start_bulk: "python3 /media/web/mate3_homeassistant/ChangeMateStatusModBus.py StartBulk"
+  outback_stop_bulk: "python3 /media/web/mate3_homeassistant/ChangeMateStatusModBus.py StopBulk"
+  outback_start_eq: "python3 /media/web/mate3_homeassistant/ChangeMateStatusModBus.py StartEQ"
+  outback_stop_eq: "python3 /media/web/mate3_homeassistant/ChangeMateStatusModBus.py StopEQ"
   
-  script_outback_start_bulk: "python3 /media/web/mate3_homeassistant/ChangeMateStatusModBus.py StartBulk"   
-  script_outback_stop_bulk: "python3 /media/web/mate3_homeassistant/ChangeMateStatusModBus.py StopBulk"
-  script_outback_start_eq: "python3 /media/web/mate3_homeassistant/ChangeMateStatusModBus.py StartEQ"
-  script_outback_start_eq: "python3 /media/web/mate3_homeassistant/ChangeMateStatusModBus.py StopEQ"
-  script_outback_read_mate_status: "python3 /media/web/mate3_homeassistant/ReadMateStatusModBus.py"
+  outback_change_mate_status: "python3 /media/web/mate3_homeassistant/ChangeMateStatusModBus.py"
+  outback_read_mate_status: "python3 /media/web/mate3_homeassistant/ReadMateStatusModBus.py daemon_active=false SQL_active=false MQTT_discovery_active=false"
