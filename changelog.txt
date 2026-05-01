@@ -48,6 +48,11 @@ ReadMateStatus version history:
 1.0.0_20260428  - major: MQTT Auto Discovery (HA), daemon mode, dynamic devices detection, summary metrics; 
                 - refactoring: runtime cycle (connect/read/process/publish/close), 
                 - improvements: improved stability, reconnect each cycle, MQTT/JSON naming, logging, multi-device support
+
+1.0.1_20260430  - fix: Prevent MariaDB summary insert/update when FNDC is not detected
+                - fix: MQTT split-phase inverter bug where ac_input_L2 was missing due to key overwrite
+                - add: validation for scan_frequency with fallback (60s)
+                - add: CLI support for overriding config values using key=value parameters
 ------------------------------------------------------------------------------------------------------------------------
 ChangeMateStatus version history:
 =====================================
