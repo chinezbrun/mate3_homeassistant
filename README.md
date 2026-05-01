@@ -18,6 +18,19 @@ This integration is based on:
 - Queries MATE3/MATE3S, retrieves data, formats it, registers it in the MariaDB database (optional - more info [here](/docs/MariaDB/Readme.txt)), pushes MQTT data, and returns a JSON file.
 - The `ReadMateStatusModBus.py` script can run in **daemon mode** with a configurable scan interval, or in **run-once mode** where a task should be created (Windows or Linux).
 - `config.cfg` is the configuration file for the script and should be set up based on your needs.
+### CLI usage
+Force a single execution in run-once mode with temporary `config.cfg` overrides:
+```
+python ReadMateStatusModbus.py daemon_active=false
+```
+* Supports multiple `key=value` arguments (e.g. `MQTT_active=false`, `MQTT_discovery_active=false`)
+```
+python ReadMateStatusModbus.py MQTT_active=false MQTT_discovery_active=false
+```
+* Allows only enabling/disabling features (MQTT, JSON, SQL); see the whitelist of valid CLI parameters
+* Any valid CLI parameter automatically forces run-once mode; therefore, `daemon_active=true` from CLI is ignored
+Default behavior (no CLI args) follows `config.cfg`.
+
 ---
 ### ReadMateStatusModBus.sh (Optional)
 - This is an example Linux script that can be used to start `ReadMateStatusModBus.py`. The script should run at the desired update frequency (e.g., every minute). Refer to your OS or distribution’s documentation for setting up daemons or scheduled tasks.
