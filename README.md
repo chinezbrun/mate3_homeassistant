@@ -1,8 +1,8 @@
 # OutBackPower Mate3 integration with Home Assistant
 
 ![Home Assistant](/docs/HomeAssistant/example_ha_sunsynk-power-flow-card.png)  
-![card](/docs/HomeAssistant/example_ha_outback_stat.png)  
-![card](/docs/HomeAssistant/example_ha_outback_config.png)
+![card](/docs/HomeAssistant/example_ha_outback_stat_card.png)  
+![card](/docs/HomeAssistant/example_ha_outback_config_card.png)
 ---
 # How Does This Software Work?
 This integration is based on:
@@ -39,10 +39,11 @@ Default behavior (no CLI args) follows `config.cfg`.
 - `ChangeMateStatusModBus.py` can write ModBus data to MATE3. A limited set of parameters can be modified.  
 - The script accepts arguments to indicate the parameters to be changed. It can also change multiple parameters during a single run.  
 - More details can be found [here](/docs/ChangeMate_Status/ChangeMateStatusInstructions.txt).  
-- Automation in Home Assistant can be achieved using [shell commands](https://www.home-assistant.io/integrations/shell_command/). Examples are below and in the documentation folder [here](/docs/HomeAssistant/).
+- Automation in Home Assistant can be achieved using [shell commands](https://www.home-assistant.io/integrations/shell_command/). Examples are in the documentation folder [here](/docs/HomeAssistant/example_shell_command_usage_yaml.txt).
 ---
 # Home Assistant Configuration
-- A new folder named `data` should be created in the `www` folder located in Home Assistant (e.g., `\home-assistant\www\data`). This folder is where the JSON file will be saved by RMS.
+- A new folder named `data` should be created in the `www` directory in Home Assistant (e.g., `/config/www/data`).  
+This path must match the JSON output path defined in `config.cfg`. RMS will save the JSON file to this location.
 
 ## Integration Variants
 ### 1. Automatic: MQTT Auto Discovery (RECOMMENDED)
@@ -62,7 +63,7 @@ MQTT_discovery_active = true
 MQTT_discovery_active = false
 ```
 - Use MQTT Explorer to view the full list of available topics.
-- Examples can be found [here](/docs/ChangeMate_Status/ChangeMateStatusInstructions.txt)
+- Examples can be found [here](/docs/HomeAssistant/examples_ha_mqtt_sensors_manual_configuration.txt)
 ### 3. Manual: JSON File Decoding (FILE integration)
 ```ini
 MQTT_discovery_active = false
