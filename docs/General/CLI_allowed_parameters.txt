@@ -1,0 +1,16 @@
+### CLI Allowed Parameters
+
+The following CLI parameters are supported (whitelisted):
+
+daemon_active            = {false}         # run-once trigger (true is ignored)
+MQTT_active              = {true, false}
+MQTT_discovery_active    = {true, false}
+SQL_active               = {true, false}   # MariaDB enable/disable
+
+Notes:
+* Values are case-insensitive (`true`, `false`)
+* Any other keys are ignored
+* Providing any valid CLI parameter forces run-once mode
+
+example:
+ReadMateStatusModBus.py daemon_active=false
