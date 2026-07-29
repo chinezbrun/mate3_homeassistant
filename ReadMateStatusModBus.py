@@ -11,7 +11,7 @@ import shutil
 import sys, os
 import re
 
-script_ver = "1.0.1_20260430"
+script_ver = "1.1.0_20260729"
 print ("script version: "+ script_ver)
 
 pathname               = os.path.dirname(sys.argv[0])
@@ -205,6 +205,84 @@ mate3_did = {
     65535: "End of SunSpec"
 }
 
+# SunSpec blocks that are actually decoded below. Blocks that the MATE3 reports but that are not in
+# this set are listed in the log at the end of every scan, so an unsupported device shows up as a
+# clear message instead of being skipped in silence.
+handled_blocks = {
+    "Split Phase Radian Inverter Real Time Block",
+    "Single Phase Radian Inverter Real Time Block",
+    "Radian Inverter Configuration Block",
+    "FX Inverter Real Time Block",
+    "FX Inverter Configuration Block",
+    "Charge Controller Block",
+    "Charge Controller Configuration block",
+    "FLEXnet-DC Real Time Block",
+    "FLEXnet-DC Configuration Block"
+}
+
+# Real time block names that carry an inverter, used to warn when a scan finds no inverter at all.
+inverter_blocks = {
+    "Split Phase Radian Inverter Real Time Block",
+    "Single Phase Radian Inverter Real Time Block",
+    "FX Inverter Real Time Block"
+}
+
+# FX/VFX series lookup tables - AXS_APP_NOTE.PDF tables 13 to 17.
+# The error and warning bits are the same as the Radian ones, but the FX enums are not: the FX
+# charger has an extra 'Auto' mode and the FX AC input type has three values instead of seven.
+fx_error_flags = [
+    (0x0001, 'Low AC output voltage'),
+    (0x0002, 'Stacking error'),
+    (0x0004, 'Over temperature error'),
+    (0x0008, 'Low battery voltage'),
+    (0x0010, 'Phase loss'),
+    (0x0020, 'High battery voltage'),
+    (0x0040, 'AC output shorted'),
+    (0x0080, 'AC backfeed')
+]
+
+fx_warning_flags = [
+    (0x0001, 'AC input frequency too high'),
+    (0x0002, 'AC input frequency too low'),
+    (0x0004, 'AC input voltage too low'),
+    (0x0008, 'AC input voltage too high'),
+    (0x0010, 'AC input current exceeds max'),
+    (0x0020, 'Temperature sensor bad'),
+    (0x0040, 'Communications error'),
+    (0x0080, 'Cooling fan fault')
+]
+
+# FX_Inverter_Operating_Mode. Same enumeration as the Radian real time blocks, so the values
+# published to Home Assistant are identical on FX and Radian hardware.
+fx_operating_modes_list = [
+    "Off",                    # 0
+    "Searching",              # 1
+    "Inverting",              # 2
+    "Charging",               # 3
+    "Silent",                 # 4
+    "Float",                  # 5
+    "Equalize",               # 6
+    "Charger Off",            # 7
+    "Support",                # 8
+    "Sell",                   # 9
+    "Pass-through",           # 10
+    "Slave Inverter On",      # 11
+    "Slave Inverter Off",     # 12
+    "Unknown",                # 13
+    "Offsetting",             # 14
+    "AGS Error",              # 15
+    "Comm Error"]             # 16
+
+fx_ac_use_list    = ["AC Drop", "AC Use"]           # FX_AC_Input_State
+fx_aux_relay_list = ["disabled", "enabled"]         # FX_AUX_Output_State
+
+# FXconfig_AC_Input_Type. Published as grid_input_mode so that it shares the Radian topic and reuses
+# the Radian wording for the modes the two families have in common.
+fx_grid_input_mode_list = ["GridTied", "Generator", "GridZero"]
+
+# FXconfig_Charger_Operating_Mode
+fx_charger_mode_list = ["Off", "Auto", "On"]
+
 # Decoder Class to replace BinaryPayloadDecoder that will be removed in pymodbus 3.9.0
 class SunSpecDecoder:
     def __init__(self, registers):
@@ -247,8 +325,64 @@ def decode_int16(signed_value):
         return int(32768 - signed_value)
     else:
         return signed_value
-    
-#convert decimal to binary string    
+
+def to_int16(register):
+    """
+    Strict two's complement conversion for registers the AXS application note declares as int16.
+
+    decode_int16() above deliberately works around a FLEXnet-DC firmware quirk and therefore cannot
+    represent small negative numbers - 0xFFFF comes back as 0 instead of -1. Scale factors and the FX
+    temperature registers do use small negative values, so they are converted here instead.
+    """
+    return register - 65536 if register > 32767 else register
+
+def sunspec_scale(register, default):
+    """
+    Convert a SunSpec scale factor register into a multiplier, e.g. a scale factor of -1 gives 0.1.
+
+    The FX blocks carry their own scale factors, so FX values are scaled with what the hardware
+    reports rather than with hardcoded constants. OutBack warn that the blocks may change between
+    firmware releases, so an implausible scale factor falls back to `default` and is logged.
+    """
+    scale_factor = to_int16(register)
+    if not -10 <= scale_factor <= 10:
+        logger.warning(".... SunSpec scale factor out of range (" + str(scale_factor) + "), using default " + str(default))
+        scale_factor = default
+    return 10 ** scale_factor
+
+def decode_enum(value, names, description):
+    """
+    Look up an enumerated register value, without raising when the MATE3 reports an unexpected one.
+    """
+    if 0 <= value < len(names):
+        return names[value]
+    logger.warning(".... Unexpected " + description + " value " + str(value))
+    return "Unknown (" + str(value) + ")"
+
+def decode_flags(value, flags, none_text='Nothing'):
+    """
+    Decode a SunSpec bitfield register into readable text.
+
+    Several bits can be set at the same time, so every flag that is set is reported.
+    """
+    if value == 0:
+        return none_text
+    set_flags = [text for bit, text in flags if value & bit]
+    if not set_flags:
+        logger.warning(".... Unexpected bitfield value " + str(value))
+        return "Unknown (" + str(value) + ")"
+    return ', '.join(set_flags)
+
+def port_label(port):
+    """
+    HUB port label from config.cfg, tolerating a port number outside the configured range.
+    """
+    if 0 <= port < len(device_list):
+        return device_list[port]
+    logger.warning(".... No label configured for HUB port " + str(port + 1))
+    return "Port" + str(port + 1)
+
+#convert decimal to binary string
 def binary(decimal) :
     otherBase = ""
     while decimal != 0 :
@@ -322,11 +456,9 @@ def getBlock(basereg):
     except:
         return None
     blocksize = int(register.registers[0])
-    blockname = None
-    try:
-        blockname = mate3_did[blockID]
-    except:
-        print("ERROR: Unknown device type with DID=" + str(blockID))
+    blockname = mate3_did.get(blockID)
+    if blockname is None:
+        logger.warning("Unknown SunSpec device type with DID=" + str(blockID) + " at register " + str(basereg) + ". The scan stops here")
     return {"size": blocksize, "DID": blockname}
 
 #------------------------------------------------
@@ -467,6 +599,27 @@ def publish_mqtt_discovery(detected_devices, MQTT_auth):
             dev_cla      = ["current", "current", "current", "current", "voltage", "voltage", "voltage", "voltage", None, None, None, None, None, "temperature", "temperature", "temperature", None, None]
             stat_cla     = ["measurement", "measurement", "measurement", "measurement", "measurement", "measurement", "measurement", "measurement", None, None, None, None, None, "measurement", "measurement", "measurement", None, None]
             unit_of_meas = ["A", "A", "A", "A", "V", "V", "V", "V", None, None, None, None, None, "°C", "°C", "°C", None, None]
+
+        # -------------------------------------------------
+        # FX / VFX series inverter sensors
+        # -------------------------------------------------
+        # Same device name, topic prefix and sensor names as the single phase Radian inverter above,
+        # so Home Assistant automations are portable between the two families. The FX real time block
+        # additionally reports daily energy counters, which the Radian blocks do not have, so those
+        # are published only for FX hardware rather than being added to the shared list.
+        elif dev_type == "fx_inverter":
+
+            summary_inverter = True
+
+            dev_name     = "outback_inverter_" + str(dev_idx)
+            display_name = "Outback Inverter " + str(dev_idx)
+            topic_prefix = "outback/inverters/" + str(dev_idx)
+
+            names        = ["inverter_current", "charge_current", "buy_current", "sell_current", "battery_voltage", "battery_voltage_compensated", "ac_input", "ac_output", "ac_use", "operating_modes", "aux_relay", "error_flags", "warning_modes", "trafo_temp", "capacitor_temp", "fet_temp", "grid_input_mode", "charger_mode", "output_kwh", "buy_kwh", "sell_kwh", "charger_kwh"]
+            ids          = ["inverter_current", "charge_current", "buy_current", "sell_current", "battery_voltage", "battery_voltage_compensated", "ac_input", "ac_output", "ac_use", "operating_modes", "aux_relay", "error_flags", "warning_modes", "trafo_temp", "capacitor_temp", "fet_temp", "grid_input_mode", "charger_mode", "output_kwh", "buy_kwh", "sell_kwh", "charger_kwh"]
+            dev_cla      = ["current", "current", "current", "current", "voltage", "voltage", "voltage", "voltage", None, None, None, None, None, "temperature", "temperature", "temperature", None, None, "energy", "energy", "energy", "energy"]
+            stat_cla     = ["measurement", "measurement", "measurement", "measurement", "measurement", "measurement", "measurement", "measurement", None, None, None, None, None, "measurement", "measurement", "measurement", None, None, "total_increasing", "total_increasing", "total_increasing", "total_increasing"]
+            unit_of_meas = ["A", "A", "A", "A", "V", "V", "V", "V", None, None, None, None, None, "°C", "°C", "°C", None, None, "kWh", "kWh", "kWh", "kWh"]
 
         # -------------------------------------------------
         # Split phase inverter sensors (L1 / L2)
@@ -731,13 +884,18 @@ def main():
     single_inverters=0                             # used to count single phase inverters for conditional summary JSON
     split_inverters=0                              # used to count split phase inverters for conditional summary JSON
     fndc_detected=False                            # used to include FNDC/battery values in summary JSON only when FNDC exists
+    detected_blocks=[]                             # used to report the SunSpec blocks seen during this scan
+    inverter_index_by_address={}                   # used to link a configuration block back to its own real time block
+    port=None                                      # HUB port of the block being decoded, reported by the error handlers
     reg = startReg
     for block in range(0, 30):
         blockResult = getBlock(reg)
         if blockResult is None or blockResult.get('DID') is None:
             logger.warning(".. Failed to read SunSpec block. Cycle will retry later")
             break
-   
+
+        detected_blocks.append(blockResult['DID'])
+
         try:        
             if "Split Phase Radian Inverter Real Time Block" in blockResult['DID']:
                 logger.debug(".. Detected a Split Phase Radian Inverter Real Time Block")
@@ -1239,6 +1397,224 @@ def main():
             logger.warning("port: " + str(port) + " FXR config block " + str(e))
 
         try:
+            if "FX Inverter Real Time Block" in blockResult['DID']:
+                logger.debug(".. Detected a FX Inverter Real Time Block")
+                inverters = inverters + 1
+                # The FX/VFX family is single phase, so it feeds the same summary totals and the same
+                # Home Assistant sensor names as the single phase Radian block above.
+                single_inverters = single_inverters + 1
+
+                # The whole block is fetched in one request instead of one request per register. The
+                # AXS application note numbers the block from 1, so its register N is fx[N-1] here.
+                response = client.read_holding_registers(reg, count=blockResult['size'] + 2)
+                fx = response.registers
+
+                port    = fx[2] - 1
+                address = port + 1
+                label   = port_label(port)
+                logger.debug(".... Connected on HUB port " + str(fx[2]))
+
+                # MQTT discovery - register detected FX inverter with HUB port label.
+                detected_devices.append({
+                    "type"  : "fx_inverter",
+                    "index" : inverters,
+                    "port"  : port + 1,
+                    "name"  : label
+                })
+                inverter_index_by_address[address] = inverters
+                logger.debug(".... HA device: Outback Inverter " + str(inverters))
+
+                # Scale factors are read from the block rather than hardcoded, because OutBack
+                # document them as firmware dependent. The defaults match the application note.
+                dc_voltage_scale = sunspec_scale(fx[3],  -1)
+                ac_current_scale = sunspec_scale(fx[4],   0)
+                ac_voltage_scale = sunspec_scale(fx[5],   0)
+                kwh_scale        = sunspec_scale(fx[27], -1)
+
+                fx_inverter_output_current = round(fx[7] * ac_current_scale, 2)
+                logger.debug(".... FX Inverted output current (A) " + str(fx_inverter_output_current))
+
+                fx_inverter_charge_current = round(fx[8] * ac_current_scale, 2)
+                logger.debug(".... FX Charger current (A) " + str(fx_inverter_charge_current))
+
+                fx_inverter_buy_current = round(fx[9] * ac_current_scale, 2)
+                logger.debug(".... FX Input current (A) " + str(fx_inverter_buy_current))
+
+                fx_inverter_sell_current = round(fx[10] * ac_current_scale, 2)
+                logger.debug(".... FX Sell current (A) " + str(fx_inverter_sell_current))
+
+                fx_output_ac_voltage = round(fx[11] * ac_voltage_scale, 2)
+                logger.debug(".... FX Voltage Out (V) " + str(fx_output_ac_voltage))
+
+                fx_ac_input_voltage = round(fx[22] * ac_voltage_scale, 2)
+                logger.debug(".... FX AC Input Voltage " + str(fx_ac_input_voltage))
+
+                # Calculated summary - single phase inverter currents.
+                inverter_total_current += fx_inverter_output_current
+                buy_total_current      += fx_inverter_buy_current
+                sell_total_current     += fx_inverter_sell_current
+                sell_total_power       += fx_inverter_sell_current * fx_ac_input_voltage
+                inverter_charge_total_current   += fx_inverter_charge_current
+
+                operating_modes = decode_enum(fx[12], fx_operating_modes_list, "FX operating mode")
+                logger.debug(".... FX Inverter Operating Mode " + str(fx[12]) + " " + operating_modes)
+
+                error_flags = decode_flags(fx[13], fx_error_flags)
+                logger.debug(".... FX Error Flags " + str(fx[13]) + " " + error_flags)
+
+                warning_flags = decode_flags(fx[14], fx_warning_flags)
+                logger.debug(".... FX Warning Flags " + str(fx[14]) + " " + warning_flags)
+
+                fx_battery_voltage = round(fx[15] * dc_voltage_scale, 1)
+                logger.debug(".... FX Battery voltage (V) " + str(fx_battery_voltage))
+
+                fx_temp_compensated_target_voltage = round(fx[16] * dc_voltage_scale, 2)
+                logger.debug(".... FX Battery target voltage - temp compensated (V) " + str(fx_temp_compensated_target_voltage))
+
+                aux_relay = decode_enum(fx[17], fx_aux_relay_list, "FX aux relay state")
+                logger.debug(".... FX Aux Relay state " + str(fx[17]) + " " + aux_relay)
+
+                fx_transformer_temperature = to_int16(fx[18])
+                logger.debug(".... FX Transformer Temperature " + str(fx_transformer_temperature))
+
+                fx_capacitor_temperature = to_int16(fx[19])
+                logger.debug(".... FX Capacitor Temperature " + str(fx_capacitor_temperature))
+
+                fx_fet_temperature = to_int16(fx[20])
+                logger.debug(".... FX FET Temperature " + str(fx_fet_temperature))
+
+                ac_use = decode_enum(fx[23], fx_ac_use_list, "FX AC input state")
+                logger.debug(".... FX AC USE (Y/N) " + str(fx[23]) + " " + ac_use)
+
+                # Daily energy counters. The Radian blocks have no equivalent, so these are published
+                # for FX hardware only and are not part of the shared inverter sensor set.
+                fx_buy_kwh = round(fx[28] * kwh_scale, 2)
+                logger.debug(".... FX Daily Buy (kWh) " + str(fx_buy_kwh))
+
+                fx_sell_kwh = round(fx[29] * kwh_scale, 2)
+                logger.debug(".... FX Daily Sell (kWh) " + str(fx_sell_kwh))
+
+                fx_output_kwh = round(fx[30] * kwh_scale, 2)
+                logger.debug(".... FX Daily Output (kWh) " + str(fx_output_kwh))
+
+                fx_charger_kwh = round(fx[31] * kwh_scale, 2)
+                logger.debug(".... FX Daily Charger (kWh) " + str(fx_charger_kwh))
+
+                # FX data - JSON preparation
+                # Field names match the single phase Radian block so that Home Assistant automations
+                # and the JSON consumers work unchanged on either inverter family.
+                devices_array={
+                  "address": address,
+                  "device_id": 5,
+                  "inverter_current": fx_inverter_output_current,
+                  "buy_current": fx_inverter_buy_current,
+                  "charge_current": fx_inverter_charge_current,
+                  "ac_input_voltage": fx_ac_input_voltage,
+                  "ac_output_voltage": fx_output_ac_voltage,
+                  "sell_current": fx_inverter_sell_current,
+                  "operating_modes": operating_modes,
+                  "trafo_temp": fx_transformer_temperature,
+                  "capacitor_temp": fx_capacitor_temperature,
+                  "fet_temperature": fx_fet_temperature,
+                  "error_modes": [
+                    error_flags
+                  ],
+                  "ac_mode": ac_use,
+                  "battery_voltage":fx_battery_voltage,
+                  "aux_relay":aux_relay,
+                  "warning_modes": [
+                    warning_flags
+                  ],
+                  "output_kwh": fx_output_kwh,
+                  "buy_kwh": fx_buy_kwh,
+                  "sell_kwh": fx_sell_kwh,
+                  "charger_kwh": fx_charger_kwh,
+                  "label":label}
+                devices.append(devices_array)     # append FX data to devices
+
+                # FX data - MariaDB SQL preparation
+                # Reuses the existing monitormate_fx table and columns, so no schema change is needed.
+                db_devices_values.append ((date_sql,address,5,fx_inverter_output_current,fx_inverter_charge_current,fx_inverter_buy_current,
+                fx_ac_input_voltage,fx_output_ac_voltage,fx_inverter_sell_current,operating_modes,
+                error_flags,ac_use,fx_battery_voltage,aux_relay,warning_flags))
+
+                db_devices_sql.append ("INSERT INTO monitormate_fx \
+                (date,address,device_id,inverter_current,charge_current,buy_current,ac_input_voltage,ac_output_voltage,\
+                sell_current,operational_mode,error_modes,ac_mode,battery_voltage,misc,warning_modes) \
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)")
+
+                # FX data - MQTT preparation
+                mqtt_devices.append({
+                             "outback/inverters/" + str(inverters) + "/inverter_current":fx_inverter_output_current,
+                             "outback/inverters/" + str(inverters) + "/charge_current"  :fx_inverter_charge_current,
+                             "outback/inverters/" + str(inverters) + "/buy_current"     :fx_inverter_buy_current,
+                             "outback/inverters/" + str(inverters) + "/sell_current"    :fx_inverter_sell_current,
+                             "outback/inverters/" + str(inverters) + "/battery_voltage" :fx_battery_voltage,
+                             "outback/inverters/" + str(inverters) + "/battery_voltage_compensated" :fx_temp_compensated_target_voltage,
+                             "outback/inverters/" + str(inverters) + "/ac_input"        :fx_ac_input_voltage,
+                             "outback/inverters/" + str(inverters) + "/ac_output"       :fx_output_ac_voltage,
+                             "outback/inverters/" + str(inverters) + "/ac_use"          :ac_use,
+                             "outback/inverters/" + str(inverters) + "/operating_modes" :operating_modes,
+                             "outback/inverters/" + str(inverters) + "/aux_relay"       :aux_relay,
+                             "outback/inverters/" + str(inverters) + "/error_flags"     :error_flags,
+                             "outback/inverters/" + str(inverters) + "/warning_modes"   :warning_flags,
+                             "outback/inverters/" + str(inverters) + "/trafo_temp"      :fx_transformer_temperature,
+                             "outback/inverters/" + str(inverters) + "/capacitor_temp"  :fx_capacitor_temperature,
+                             "outback/inverters/" + str(inverters) + "/fet_temp"        :fx_fet_temperature,
+                             "outback/inverters/" + str(inverters) + "/output_kwh"      :fx_output_kwh,
+                             "outback/inverters/" + str(inverters) + "/buy_kwh"         :fx_buy_kwh,
+                             "outback/inverters/" + str(inverters) + "/sell_kwh"        :fx_sell_kwh,
+                             "outback/inverters/" + str(inverters) + "/charger_kwh"     :fx_charger_kwh
+                             })
+
+        except Exception as e:
+            logger.warning("port: " + str(port) + " FX module " + str(e))
+
+        try:
+            if "FX Inverter Configuration Block" in blockResult['DID']:
+                logger.debug(".. Detected a FX Inverter Configuration Block")
+
+                response = client.read_holding_registers(reg, count=blockResult['size'] + 2)
+                fxconfig = response.registers
+
+                # The port is read from this block rather than reused from the previous one, so the
+                # values always land on the inverter they belong to.
+                fxconfig_address = fxconfig[2]
+                fx_index = inverter_index_by_address.get(fxconfig_address)
+
+                if fx_index is None:
+                    logger.warning(".. FX Inverter Configuration Block on HUB port " + str(fxconfig_address) + " has no matching real time block. Skipped")
+                else:
+                    grid_input_mode = decode_enum(fxconfig[20], fx_grid_input_mode_list, "FX AC input type")
+                    logger.debug(".... FX Grid input Mode " + str(fxconfig[20]) + " " + grid_input_mode)
+
+                    charger_mode = decode_enum(fxconfig[25], fx_charger_mode_list, "FX charger operating mode")
+                    logger.debug(".... FX Charger Mode " + str(fxconfig[25]) + " " + charger_mode)
+
+                    # FX dataconfig - JSON preparation
+                    various_array={
+                      "address": fxconfig_address,
+                      "device_id": 5,
+                      "grid_input_mode": grid_input_mode,
+                      "charger_mode": charger_mode
+                      }
+                    various.append(various_array)     # append FX data to devices
+
+                    for device in devices:
+                        if device.get("address") == fxconfig_address and device.get("device_id") == 5:
+                            device["grid_input_mode"] = grid_input_mode
+                            device["charger_mode"]    = charger_mode
+                            break
+
+                    # FX dataconfig - Mqtt preparation
+                    mqtt_devices.append(
+                            {"outback/inverters/" + str(fx_index) + "/grid_input_mode":grid_input_mode,
+                             "outback/inverters/" + str(fx_index) + "/charger_mode"   :charger_mode})
+
+        except Exception as e:
+            logger.warning("port: " + str(port) + " FX config block " + str(e))
+
+        try:
             if "Charge Controller Block" in blockResult['DID']:
                 logger.debug(".. Detected a Charge Controller Block")
                 chargers = chargers +1
@@ -1662,6 +2038,18 @@ def main():
         if "End of SunSpec" not in blockResult['DID']:
             reg = reg + blockResult['size'] + 2
         else:
+            # Report what the scan found. A block that is present but not decoded used to be skipped
+            # without a trace, which made unsupported hardware very hard to spot.
+            logger.debug(" SunSpec blocks detected: " + ", ".join(detected_blocks))
+
+            not_decoded = sorted({name for name in detected_blocks
+                                  if name not in handled_blocks and name != "End of SunSpec"})
+            if not_decoded:
+                logger.debug(" SunSpec blocks present but not decoded by this script: " + ", ".join(not_decoded))
+
+            if inverters == 0 and not any(name in inverter_blocks for name in detected_blocks):
+                logger.warning(" No inverter real time block found. Blocks detected: " + ", ".join(detected_blocks))
+
             client.close()
             client = None
             mate_run = datetime.now()                                             

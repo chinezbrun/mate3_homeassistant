@@ -53,6 +53,15 @@ ReadMateStatus version history:
                 - fix: MQTT split-phase inverter bug where ac_input_L2 was missing due to key overwrite
                 - add: validation for scan_frequency with fallback (60s)
                 - add: CLI support for overriding config values using key=value parameters
+
+1.1.0_20260729   - new: support for FX/VFX series inverters (SunSpec blocks 64113 real time / 64114 configuration).
+                   These were never read, so on FX hardware the inverter was missing from the JSON, from MQTT and
+                   from Home Assistant. FX publishes the same fields and topics as the single phase Radian inverter,
+                   plus the daily buy/sell/output/charger kWh counters that only the FX block provides.
+                 - new: FX values are scaled using the scale factor registers reported by the block itself
+                 - add: scan now logs the SunSpec blocks it found and warns when no inverter block was decoded,
+                   instead of skipping unsupported hardware in silence
+                 - add: FX error and warning bitfields report every flag that is set, not just single bit values
 ------------------------------------------------------------------------------------------------------------------------
 ChangeMateStatus version history:
 =====================================

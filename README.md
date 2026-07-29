@@ -4,6 +4,20 @@
 ![card](/docs/HomeAssistant/example_ha_outback_stat_card.png)  
 ![card](/docs/HomeAssistant/example_ha_outback_config_card.png)
 ---
+# Supported Hardware
+Devices are detected automatically from the SunSpec blocks the MATE3 reports - no configuration is needed to select a hardware family.
+
+| Device | SunSpec blocks | Notes |
+|---|---|---|
+| Radian / FXR inverter, split phase | 64115 / 64116 | |
+| Radian / FXR inverter, single phase | 64117 / 64116 | |
+| FX / VFX inverter | 64113 / 64114 | Single phase. Also reports daily buy/sell/output/charger kWh |
+| FM60 / FM80 charge controller | 64111 / 64112 | |
+| FLEXnet-DC battery monitor | 64118 / 64119 | |
+
+FX/VFX and Radian inverters publish the same JSON fields and MQTT topics, so Home Assistant automations are portable between the two families.
+
+---
 # How Does This Software Work?
 This integration is based on:
 - `ReadMateStatusModBus.py` (RMS) for reading MATE3  
