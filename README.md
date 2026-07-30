@@ -67,6 +67,8 @@ Roles are optional. **Leave all three blank and the previous behaviour is kept**
 
 Shunt labels (`shunt_a`, `shunt_b`, `shunt_c`) remain free text and set the display name of the shunt sensors in Home Assistant. They do not affect any calculation - that is what the roles are for.
 
+Changing a role takes effect on the next restart, and the sensors for the old role are removed from Home Assistant automatically. If you are upgrading from a version before roles existed, entities created by that version are cleared on the first run of this one.
+
 ### ReadMateStatusModBus.sh (Optional)
 - This is an example Linux script that can be used to start `ReadMateStatusModBus.py`. The script should run at the desired update frequency (e.g., every minute). Refer to your OS or distribution’s documentation for setting up daemons or scheduled tasks.
 ---

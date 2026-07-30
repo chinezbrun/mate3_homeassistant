@@ -549,6 +549,28 @@ script_start_time = datetime.now()
 mqtt_discovery_done = False
 
 
+# Sensor ids per inverter family. Every inverter family uses the same Home Assistant device name,
+# outback_inverter_n, so the sensors behind that device depend on which family is fitted. These are
+# named here rather than inline below so the union can be worked out for the retraction step.
+INVERTER_SENSOR_IDS = ["inverter_current", "charge_current", "buy_current", "sell_current", "battery_voltage", "battery_voltage_compensated", "ac_input", "ac_output", "ac_use", "operating_modes", "aux_relay", "error_flags", "warning_modes", "trafo_temp", "capacitor_temp", "fet_temp", "grid_input_mode", "charger_mode"]
+SPLIT_INVERTER_SENSOR_IDS = ["inverter_L1_current", "charge_L1_current", "buy_L1_current", "sell_L1_current", "inverter_L2_current", "charge_L2_current", "buy_L2_current", "sell_L2_current", "battery_voltage", "battery_voltage_compensated", "ac_input_L1", "ac_output_L1", "ac_input_L2", "ac_output_L2", "ac_use", "operating_modes", "aux_relay", "error_flags", "warning_modes", "trafo_L_temp", "capacitor_L_temp", "fet_L_temp", "trafo_R_temp", "capacitor_R_temp", "fet_R_temp", "grid_input_mode", "charger_mode"]
+
+# Every sensor id any inverter family can publish, used to clear the ones this system does not have.
+INVERTER_SENSOR_IDS_ALL = sorted(set(INVERTER_SENSOR_IDS + SPLIT_INVERTER_SENSOR_IDS))
+
+# MQTT discovery retraction.
+# Discovery configs are published retained, so the broker keeps serving them until they are replaced
+# or cleared. A sensor that stops being applicable - a different inverter family, a shunt role that
+# is no longer configured - would otherwise stay in Home Assistant forever, showing a stale value.
+# Publishing an empty retained payload to its config topic clears the broker copy and tells Home
+# Assistant to delete the entity. This runs on every discovery, so no state has to be kept and no
+# information has to be read back from the broker.
+def retract_discovery(dev_name, stale_ids, MQTT_auth):
+    for stale_id in sorted(stale_ids):
+        config_topic = "homeassistant/sensor/" + dev_name + "/" + dev_name + "_" + stale_id + "/config"
+        publish.single(config_topic, "", hostname=MQTT_broker, port=MQTT_port, auth=MQTT_auth, qos=0, retain=True)
+        logger.debug(" HA sensor retracted: " + dev_name + "_" + stale_id)
+
 # MQTT Home Assistant discovery.
 # Creates retained MQTT discovery entities after the first successful Mate3 scan.
 # Devices are created only from real devices detected during the SunSpec scan:
@@ -631,8 +653,8 @@ def publish_mqtt_discovery(detected_devices, MQTT_auth):
             display_name = "Outback Inverter " + str(dev_idx)
             topic_prefix = "outback/inverters/" + str(dev_idx)
 
-            names        = ["inverter_current", "charge_current", "buy_current", "sell_current", "battery_voltage", "battery_voltage_compensated", "ac_input", "ac_output", "ac_use", "operating_modes", "aux_relay", "error_flags", "warning_modes", "trafo_temp", "capacitor_temp", "fet_temp", "grid_input_mode", "charger_mode"]
-            ids          = ["inverter_current", "charge_current", "buy_current", "sell_current", "battery_voltage", "battery_voltage_compensated", "ac_input", "ac_output", "ac_use", "operating_modes", "aux_relay", "error_flags", "warning_modes", "trafo_temp", "capacitor_temp", "fet_temp", "grid_input_mode", "charger_mode"]
+            names        = INVERTER_SENSOR_IDS
+            ids          = INVERTER_SENSOR_IDS
             dev_cla      = ["current", "current", "current", "current", "voltage", "voltage", "voltage", "voltage", None, None, None, None, None, "temperature", "temperature", "temperature", None, None]
             stat_cla     = ["measurement", "measurement", "measurement", "measurement", "measurement", "measurement", "measurement", "measurement", None, None, None, None, None, "measurement", "measurement", "measurement", None, None]
             unit_of_meas = ["A", "A", "A", "A", "V", "V", "V", "V", None, None, None, None, None, "°C", "°C", "°C", None, None]
@@ -669,14 +691,19 @@ def publish_mqtt_discovery(detected_devices, MQTT_auth):
             display_name = "Outback Inverter " + str(dev_idx)
             topic_prefix = "outback/inverters/" + str(dev_idx)
 
-            names        = ["inverter_L1_current", "charge_L1_current", "buy_L1_current", "sell_L1_current", "inverter_L2_current", "charge_L2_current", "buy_L2_current", "sell_L2_current", "battery_voltage", "battery_voltage_compensated", "ac_input_L1", "ac_output_L1", "ac_input_L2", "ac_output_L2", "ac_use", "operating_modes", "aux_relay", "error_flags", "warning_modes", "trafo_L_temp", "capacitor_L_temp", "fet_L_temp", "trafo_R_temp", "capacitor_R_temp", "fet_R_temp", "grid_input_mode", "charger_mode"]
-            ids          = ["inverter_L1_current", "charge_L1_current", "buy_L1_current", "sell_L1_current", "inverter_L2_current", "charge_L2_current", "buy_L2_current", "sell_L2_current", "battery_voltage", "battery_voltage_compensated", "ac_input_L1", "ac_output_L1", "ac_input_L2", "ac_output_L2", "ac_use", "operating_modes", "aux_relay", "error_flags", "warning_modes", "trafo_L_temp", "capacitor_L_temp", "fet_L_temp", "trafo_R_temp", "capacitor_R_temp", "fet_R_temp", "grid_input_mode", "charger_mode"]
+            names        = SPLIT_INVERTER_SENSOR_IDS
+            ids          = SPLIT_INVERTER_SENSOR_IDS
             dev_cla      = ["current", "current", "current", "current", "current", "current", "current", "current", "voltage", "voltage", "voltage", "voltage", "voltage", "voltage", None, None, None, None, None, "temperature", "temperature", "temperature", "temperature", "temperature", "temperature", None, None]
             stat_cla     = ["measurement", "measurement", "measurement", "measurement", "measurement", "measurement", "measurement", "measurement", "measurement", "measurement", "measurement", "measurement", "measurement", "measurement", None, None, None, None, None, "measurement", "measurement", "measurement", "measurement", "measurement", "measurement", None, None]
             unit_of_meas = ["A", "A", "A", "A", "A", "A", "A", "A", "V", "V", "V", "V", "V", "V", None, None, None, None, None, "°C", "°C", "°C", "°C", "°C", "°C", None, None]
 
         else:
             continue
+
+        # An inverter device carries different sensors depending on its family, so anything this
+        # family does not publish is cleared. The other device types have a fixed sensor set.
+        if dev_type in ("inverter", "split_inverter"):
+            retract_discovery(dev_name, set(INVERTER_SENSOR_IDS_ALL) - set(ids), MQTT_auth)
 
         for n in range(len(ids)):
 
@@ -727,8 +754,17 @@ def publish_mqtt_discovery(detected_devices, MQTT_auth):
     stat_cla     = []
     unit_of_meas = []
 
+    catalogue    = []
+
     # Append one calculated Summary sensor definition to the discovery lists.
-    def add_summary_sensor(name, device_class, state_class, unit):
+    # Every sensor is recorded in the catalogue whether or not it applies to this system, so the
+    # retraction below always knows the full set this script can publish. Passing 'active' rather
+    # than wrapping the calls in an if keeps the catalogue complete by construction - a sensor
+    # cannot be added without the retraction learning about it.
+    def add_summary_sensor(name, device_class, state_class, unit, active=True):
+        catalogue.append(name)
+        if not active:
+            return
         names.append(name)
         ids.append(name)
         topics.append("outback/summary/" + name)
@@ -736,55 +772,56 @@ def publish_mqtt_discovery(detected_devices, MQTT_auth):
         stat_cla.append(state_class)
         unit_of_meas.append(unit)
 
-    if summary_charger:
-        add_summary_sensor("pv_total_power",        "power",   "measurement",      "W")
-        add_summary_sensor("pv_daily_kwh",          "energy",  "total_increasing", "kWh")
-        add_summary_sensor("pv_total_current",      "current", "measurement",      "A")
-        add_summary_sensor("chargers_total_current", "current", "measurement",      "A")
+    add_summary_sensor("pv_total_power",        "power",   "measurement",      "W",   active=summary_charger)
+    add_summary_sensor("pv_daily_kwh",          "energy",  "total_increasing", "kWh", active=summary_charger)
+    add_summary_sensor("pv_total_current",      "current", "measurement",      "A",   active=summary_charger)
+    add_summary_sensor("chargers_total_current", "current", "measurement",     "A",   active=summary_charger)
 
-    if summary_fndc:
-        add_summary_sensor("battery_current",       "current", "measurement",      "A")
-        add_summary_sensor("battery_power",         "power",   "measurement",      "W")
-        add_summary_sensor("battery_in_power",      "power",   "measurement",      "W")
-        add_summary_sensor("battery_out_power",     "power",   "measurement",      "W")
-        # One sensor pair per shunt role actually in use on this system.
-        if shunt_roles_configured:
-            for role in sorted({r for r in shunt_role_list if r in SHUNT_SOURCE_ROLES + SHUNT_SINK_ROLES}):
-                add_summary_sensor("shunt_" + role + "_current", "current", "measurement", "A")
-                add_summary_sensor("shunt_" + role + "_power",   "power",   "measurement", "W")
+    add_summary_sensor("battery_current",       "current", "measurement",      "A",   active=summary_fndc)
+    add_summary_sensor("battery_power",         "power",   "measurement",      "W",   active=summary_fndc)
+    add_summary_sensor("battery_in_power",      "power",   "measurement",      "W",   active=summary_fndc)
+    add_summary_sensor("battery_out_power",     "power",   "measurement",      "W",   active=summary_fndc)
 
-        if 'diverter' in shunt_role_list:
-            add_summary_sensor("diverted_current",      "current", "measurement",      "A")
-            add_summary_sensor("diverted_power",        "power",   "measurement",      "W")
+    # One sensor pair per shunt role. Every role is offered to the catalogue so that a role removed
+    # from config.cfg has its sensors cleared on the next run.
+    for role in SHUNT_SOURCE_ROLES + SHUNT_SINK_ROLES:
+        role_active = summary_fndc and shunt_roles_configured and role in shunt_role_list
+        add_summary_sensor("shunt_" + role + "_current", "current", "measurement", "A", active=role_active)
+        add_summary_sensor("shunt_" + role + "_power",   "power",   "measurement", "W", active=role_active)
 
-    if summary_inverter:
-        add_summary_sensor("inverter_total_current", "current", "measurement",     "A")
-        add_summary_sensor("buy_total_current",      "current", "measurement",     "A")
-        add_summary_sensor("sell_total_current",     "current", "measurement",     "A")
-        add_summary_sensor("inverter_charge_total_current",   "current", "measurement",     "A")
+    diverter_active = summary_fndc and 'diverter' in shunt_role_list
+    add_summary_sensor("diverted_current",      "current", "measurement",      "A",   active=diverter_active)
+    add_summary_sensor("diverted_power",        "power",   "measurement",      "W",   active=diverter_active)
+
+    add_summary_sensor("inverter_total_current", "current", "measurement",     "A", active=summary_inverter)
+    add_summary_sensor("buy_total_current",      "current", "measurement",     "A", active=summary_inverter)
+    add_summary_sensor("sell_total_current",     "current", "measurement",     "A", active=summary_inverter)
+    add_summary_sensor("inverter_charge_total_current",   "current", "measurement",     "A", active=summary_inverter)
 
     # sell_total_power is valid for both single and split inverter systems.
     # For split systems it is the sum of L1 and L2 sell power.
-    if summary_inverter or summary_split_inverter:
-        add_summary_sensor("sell_total_power",       "power",   "measurement",     "W")
+    add_summary_sensor("sell_total_power",       "power",   "measurement",     "W", active=summary_inverter or summary_split_inverter)
 
-    if summary_split_inverter:
-        add_summary_sensor("inverter_L1_total_current", "current", "measurement",  "A")
-        add_summary_sensor("inverter_L2_total_current", "current", "measurement",  "A")
-        add_summary_sensor("inverter_L1_total_power",   "power",   "measurement",  "W")
-        add_summary_sensor("inverter_L2_total_power",   "power",   "measurement",  "W")
-        add_summary_sensor("buy_L1_total_current",      "current", "measurement",  "A")
-        add_summary_sensor("buy_L2_total_current",      "current", "measurement",  "A")
-        add_summary_sensor("buy_L1_total_power",        "power",   "measurement",  "W")
-        add_summary_sensor("buy_L2_total_power",        "power",   "measurement",  "W")
-        add_summary_sensor("sell_L1_total_current",     "current", "measurement",  "A")
-        add_summary_sensor("sell_L2_total_current",     "current", "measurement",  "A")
-        add_summary_sensor("sell_L1_total_power",       "power",   "measurement",  "W")
-        add_summary_sensor("sell_L2_total_power",       "power",   "measurement",  "W")
-        add_summary_sensor("charge_L1_total_current",   "current", "measurement",  "A")
-        add_summary_sensor("charge_L2_total_current",   "current", "measurement",  "A")
-        add_summary_sensor("charge_L1_total_power",     "power",   "measurement",  "W")
-        add_summary_sensor("charge_L2_total_power",     "power",   "measurement",  "W")
+    add_summary_sensor("inverter_L1_total_current", "current", "measurement",  "A", active=summary_split_inverter)
+    add_summary_sensor("inverter_L2_total_current", "current", "measurement",  "A", active=summary_split_inverter)
+    add_summary_sensor("inverter_L1_total_power",   "power",   "measurement",  "W", active=summary_split_inverter)
+    add_summary_sensor("inverter_L2_total_power",   "power",   "measurement",  "W", active=summary_split_inverter)
+    add_summary_sensor("buy_L1_total_current",      "current", "measurement",  "A", active=summary_split_inverter)
+    add_summary_sensor("buy_L2_total_current",      "current", "measurement",  "A", active=summary_split_inverter)
+    add_summary_sensor("buy_L1_total_power",        "power",   "measurement",  "W", active=summary_split_inverter)
+    add_summary_sensor("buy_L2_total_power",        "power",   "measurement",  "W", active=summary_split_inverter)
+    add_summary_sensor("sell_L1_total_current",     "current", "measurement",  "A", active=summary_split_inverter)
+    add_summary_sensor("sell_L2_total_current",     "current", "measurement",  "A", active=summary_split_inverter)
+    add_summary_sensor("sell_L1_total_power",       "power",   "measurement",  "W", active=summary_split_inverter)
+    add_summary_sensor("sell_L2_total_power",       "power",   "measurement",  "W", active=summary_split_inverter)
+    add_summary_sensor("charge_L1_total_current",   "current", "measurement",  "A", active=summary_split_inverter)
+    add_summary_sensor("charge_L2_total_current",   "current", "measurement",  "A", active=summary_split_inverter)
+    add_summary_sensor("charge_L1_total_power",     "power",   "measurement",  "W", active=summary_split_inverter)
+    add_summary_sensor("charge_L2_total_power",     "power",   "measurement",  "W", active=summary_split_inverter)
+
+    # Clear the summary sensors this system does not have, including any left behind by an earlier
+    # run with different hardware or a different shunt role configuration.
+    retract_discovery(dev_name, set(catalogue) - set(ids), MQTT_auth)
 
     for n in range(len(ids)):
 

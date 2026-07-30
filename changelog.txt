@@ -72,6 +72,11 @@ ReadMateStatus version history:
                    instead of being written only to the JSON file. Entity ids and topics are unchanged
                  - add: shunts declared unused are excluded from the calculated battery current
                  - add: shunt roles reported in the JSON as shunt_a_role, shunt_b_role, shunt_c_role
+                 - fix: MQTT discovery configs are published retained, so a sensor that stopped being applicable
+                   stayed in Home Assistant forever showing a stale value. Discovery now clears the config of
+                   every sensor it knows about but is not publishing, so changing shunt roles or inverter
+                   hardware no longer leaves orphaned entities behind. No broker read and no state file -
+                   the set of possible sensors is known from the code
 ------------------------------------------------------------------------------------------------------------------------
 ChangeMateStatus version history:
 =====================================
