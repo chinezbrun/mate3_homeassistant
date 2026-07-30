@@ -45,6 +45,28 @@ python ReadMateStatusModbus.py MQTT_active=false MQTT_discovery_active=false
 * Any valid CLI parameter automatically forces run-once mode; therefore, `daemon_active=true` from CLI is ignored
 Default behavior (no CLI args) follows `config.cfg`.
 
+### FLEXnet-DC shunt roles
+The FNDC reports what each of its three shunts measures, but not what the shunt is *wired to* - a shunt on a diversion load and one on an inverter look identical over ModBus. The calculated summary values therefore need to be told, in the `[Labels]` section of `config.cfg`:
+
+```ini
+shunt_a_role = unused
+shunt_b_role = solar
+shunt_c_role = inverter
+```
+
+| Role | Meaning |
+|---|---|
+| `solar`, `charger` | Current normally flows into the battery. Reported positive while charging |
+| `inverter`, `load`, `diverter` | Current normally flows out of the battery. Reported positive while drawing |
+| `unused` | Shunt is not connected. Left out of the battery current total |
+| `other` | Counted in the battery total, but gets no total of its own |
+
+For each role in use, the summary publishes `shunt_<role>_current` and `shunt_<role>_power`. A role you do not have produces no sensors.
+
+Roles are optional. **Leave all three blank and the previous behaviour is kept**, where shunt C was assumed to be a diversion load and published as `diverted_current` / `diverted_power`. Those two values are still published when a shunt is given the `diverter` role, so existing dashboards keep working.
+
+Shunt labels (`shunt_a`, `shunt_b`, `shunt_c`) remain free text and set the display name of the shunt sensors in Home Assistant. They do not affect any calculation - that is what the roles are for.
+
 ### ReadMateStatusModBus.sh (Optional)
 - This is an example Linux script that can be used to start `ReadMateStatusModBus.py`. The script should run at the desired update frequency (e.g., every minute). Refer to your OS or distribution’s documentation for setting up daemons or scheduled tasks.
 ---
