@@ -56,14 +56,18 @@ shunt_c_role = inverter
 
 | Role | Meaning |
 |---|---|
-| `solar`, `charger` | Current normally flows into the battery. Reported positive while charging |
-| `inverter`, `load`, `diverter` | Current normally flows out of the battery. Reported positive while drawing |
+| `solar`, `charger` | Source. Current normally flows into the battery |
+| `inverter`, `load`, `diverter` | Sink. Current normally flows out of the battery |
 | `unused` | Shunt is not connected. Left out of the battery current total |
 | `other` | Counted in the battery total, but gets no total of its own |
 
 For each role in use, the summary publishes `shunt_<role>_current` and `shunt_<role>_power`. A role you do not have produces no sensors.
 
-Roles are optional. **Leave all three blank and the previous behaviour is kept**, where shunt C was assumed to be a diversion load and published as `diverted_current` / `diverted_power`. Those two values are still published when a shunt is given the `diverter` role, so existing dashboards keep working.
+**Both** the current and the power of a role are reported in the direction that role normally runs: a source reads positive while supplying the battery, a sink positive while drawing from it. So an inverter drawing 350 W reports `shunt_inverter_current` 6.7 and `shunt_inverter_power` 351, rather than a negative current beside a positive power.
+
+The raw reading in the FNDC's own sign convention, where positive always means into the battery, stays available unchanged on the per shunt sensors `shunt_a_current`, `shunt_b_current` and `shunt_c_current`.
+
+Roles are optional. **Leave all three blank and the previous behaviour is kept**, where shunt C was assumed to be a diversion load and published as `diverted_current` / `diverted_power`. In that case the output is unchanged in every respect, including the JSON file, which does not gain the role fields. Those two values are still published when a shunt is given the `diverter` role, so existing dashboards keep working - and `diverted_current` keeps the raw FNDC convention it has always had, so upgrading never flips the sign of a sensor you already use. Its role equivalent `shunt_diverter_current` follows the role convention above.
 
 Shunt labels (`shunt_a`, `shunt_b`, `shunt_c`) remain free text and set the display name of the shunt sensors in Home Assistant. They do not affect any calculation - that is what the roles are for.
 

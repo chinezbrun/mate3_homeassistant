@@ -71,7 +71,10 @@ ReadMateStatus version history:
                  - fix: configured shunt labels are now used for the Home Assistant sensor display names,
                    instead of being written only to the JSON file. Entity ids and topics are unchanged
                  - add: shunts declared unused are excluded from the calculated battery current
-                 - add: shunt roles reported in the JSON as shunt_a_role, shunt_b_role, shunt_c_role
+                 - add: shunt roles reported in the JSON as shunt_a_role, shunt_b_role, shunt_c_role, but only
+                   when roles are configured, so an installation that does not use them sees no JSON change
+                 - note: shunt_<role>_current and shunt_<role>_power are both signed by role direction. The
+                   legacy diverted_current keeps the raw FNDC sign it has always had
                  - fix: MQTT discovery configs are published retained, so a sensor that stopped being applicable
                    stayed in Home Assistant forever showing a stale value. Discovery now clears the config of
                    every sensor it knows about but is not publishing, so changing shunt roles or inverter

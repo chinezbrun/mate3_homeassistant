@@ -1882,23 +1882,29 @@ def main():
                 battery_out_power = battery_power if battery_power > 0 else 0
 
                 # Per role totals, so a system can report what its shunts actually measure. Shunts
-                # sharing a role are summed. Source roles are reported positive while supplying the
-                # battery, sink roles positive while drawing from it.
-                shunt_role_current = {}
-                shunt_role_power   = {}
+                # sharing a role are summed. Both the current and the power of a role are reported in
+                # the direction that role normally runs: source roles positive while supplying the
+                # battery, sink roles positive while drawing from it. The raw FNDC reading, in the
+                # FNDC's own sign convention, stays available on the per shunt sensors.
+                shunt_role_raw_current = {}
+                shunt_role_current     = {}
+                shunt_role_power       = {}
                 for current, role in zip(shunt_currents, shunt_role_list):
                     if role not in SHUNT_SOURCE_ROLES + SHUNT_SINK_ROLES:
                         continue
-                    shunt_role_current[role] = round(shunt_role_current.get(role, 0) + current, 2)
+                    shunt_role_raw_current[role] = round(shunt_role_raw_current.get(role, 0) + current, 2)
 
-                for role, current in shunt_role_current.items():
+                for role, raw_current in shunt_role_raw_current.items():
                     direction = 1 if role in SHUNT_SOURCE_ROLES else -1
-                    shunt_role_power[role] = round(fn_battery_voltage * current * direction, 0)
+                    shunt_role_current[role] = round(raw_current * direction, 2)
+                    shunt_role_power[role]   = round(fn_battery_voltage * raw_current * direction, 0)
 
                 # diverted_current / diverted_power predate the role config, so they are still
                 # published, but only when a shunt is actually declared as a diversion load.
-                if 'diverter' in shunt_role_current:
-                    diverted_current = shunt_role_current['diverter']
+                # diverted_current has always been the raw FNDC reading and keeps that convention,
+                # so upgrading does not silently flip the sign of an existing sensor.
+                if 'diverter' in shunt_role_raw_current:
+                    diverted_current = shunt_role_raw_current['diverter']
                     diverted_power   = shunt_role_power['diverter']
 
                 response = client.read_holding_registers(reg + 27, count=1)
@@ -2051,11 +2057,17 @@ def main():
                   "label": device_list[port],
                   "shunt_a_label": shunt_list[0],
                   "shunt_b_label": shunt_list[1],
-                  "shunt_c_label": shunt_list[2],
-                  "shunt_a_role": shunt_role_list[0],
-                  "shunt_b_role": shunt_role_list[1],
-                  "shunt_c_role": shunt_role_list[2]
-                }            
+                  "shunt_c_label": shunt_list[2]
+                }
+
+                # Roles appear in the JSON only when they were actually set in config.cfg. An
+                # installation that has not configured them keeps its previous output unchanged, and
+                # the presence of these fields means a role was chosen rather than assumed.
+                if shunt_roles_configured:
+                    devices_array["shunt_a_role"] = shunt_role_list[0]
+                    devices_array["shunt_b_role"] = shunt_role_list[1]
+                    devices_array["shunt_c_role"] = shunt_role_list[2]
+
                 devices.append(devices_array)
                                 
                 # FNDC data - MariaDB SQL preparation
