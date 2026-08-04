@@ -71,7 +71,7 @@ Roles are optional. **Leave all three blank and the previous behaviour is kept**
 
 Shunt labels (`shunt_a`, `shunt_b`, `shunt_c`) remain free text and set the display name of the shunt sensors in Home Assistant. They do not affect any calculation - that is what the roles are for.
 
-Changing a role takes effect on the next restart, and the sensors for the old role are removed from Home Assistant automatically. If you are upgrading from a version before roles existed, entities created by that version are cleared on the first run of this one.
+Changing a role takes effect on the next restart. The sensors for the old role are not removed from Home Assistant automatically - see [Removing entities that are no longer published](#removing-entities-that-are-no-longer-published) below.
 
 ### ReadMateStatusModBus.sh (Optional)
 - This is an example Linux script that can be used to start `ReadMateStatusModBus.py`. The script should run at the desired update frequency (e.g., every minute). Refer to your OS or distribution’s documentation for setting up daemons or scheduled tasks.
@@ -99,6 +99,30 @@ MQTT_discovery_active = true
   - FNDC  
   - Summary  
   - System  
+
+#### Removing entities that are no longer published
+Discovery configs and sensor values are published to MQTT with the **retain** flag, and the topics are one per sensor. When your configuration changes, the script publishes the topics that now apply - it does not publish to the topics that no longer apply, and nothing overwrites them. The broker keeps serving those old retained messages, including across a broker restart, so Home Assistant recreates the entity every time it subscribes and shows its last value indefinitely. Deleting the device in Home Assistant does not help, because the retained config brings it straight back.
+
+This happens after a shunt role change, after swapping between inverter families, or whenever a sensor stops applying for any other reason.
+
+```ini
+MQTT_discovery_cleanup = false
+```
+
+Left at the default, the script **reports** those sensors in the log on each discovery and leaves them alone:
+
+```
+HA sensors not published by this configuration for outback_summary: diverted_current, diverted_power
+Any of these still shown in Home Assistant are left over from an earlier configuration.
+Set MQTT_discovery_cleanup=true in config.cfg to remove them
+```
+
+The script cannot tell which of those actually exist in Home Assistant without reading the broker back, which it deliberately does not do, so on a new installation this list is simply the sensors your hardware does not have.
+
+Set it to `true` and the script clears them instead, by publishing an empty retained message to both the discovery config topic and the state topic - which is the only mechanism MQTT auto discovery provides for removing an entity. This deletes entities from Home Assistant, so it is off unless you ask for it.
+
+Only sensors are cleared, and only within devices that are still present. A device that is missing from a scan is never removed, so a charge controller that is briefly offline does not disappear from Home Assistant.
+
 ### 2. Manual: MQTT Sensors Configuration in YAML
 ```ini
 MQTT_discovery_active = false

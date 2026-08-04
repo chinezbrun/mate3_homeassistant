@@ -96,6 +96,7 @@ if output_path == "":
 # MQTT 
 MQTT_active            = config.get('MQTT', 'MQTT_active')
 MQTT_discovery_active  = config.get('MQTT', 'MQTT_discovery_active', fallback='true')
+MQTT_discovery_cleanup = config.get('MQTT', 'MQTT_discovery_cleanup', fallback='false')
 MQTT_broker            = config.get('MQTT', 'MQTT_broker')
 MQTT_port              = int(config.get('MQTT', 'MQTT_port'))
 MQTT_username          = config.get('MQTT', 'MQTT_username')
@@ -553,22 +554,57 @@ mqtt_discovery_done = False
 # outback_inverter_n, so the sensors behind that device depend on which family is fitted. These are
 # named here rather than inline below so the union can be worked out for the retraction step.
 INVERTER_SENSOR_IDS = ["inverter_current", "charge_current", "buy_current", "sell_current", "battery_voltage", "battery_voltage_compensated", "ac_input", "ac_output", "ac_use", "operating_modes", "aux_relay", "error_flags", "warning_modes", "trafo_temp", "capacitor_temp", "fet_temp", "grid_input_mode", "charger_mode"]
+FX_INVERTER_SENSOR_IDS = INVERTER_SENSOR_IDS + ["output_kwh", "buy_kwh", "sell_kwh", "charger_kwh"]
 SPLIT_INVERTER_SENSOR_IDS = ["inverter_L1_current", "charge_L1_current", "buy_L1_current", "sell_L1_current", "inverter_L2_current", "charge_L2_current", "buy_L2_current", "sell_L2_current", "battery_voltage", "battery_voltage_compensated", "ac_input_L1", "ac_output_L1", "ac_input_L2", "ac_output_L2", "ac_use", "operating_modes", "aux_relay", "error_flags", "warning_modes", "trafo_L_temp", "capacitor_L_temp", "fet_L_temp", "trafo_R_temp", "capacitor_R_temp", "fet_R_temp", "grid_input_mode", "charger_mode"]
 
 # Every sensor id any inverter family can publish, used to clear the ones this system does not have.
-INVERTER_SENSOR_IDS_ALL = sorted(set(INVERTER_SENSOR_IDS + SPLIT_INVERTER_SENSOR_IDS))
+INVERTER_SENSOR_IDS_ALL = sorted(set(INVERTER_SENSOR_IDS + FX_INVERTER_SENSOR_IDS + SPLIT_INVERTER_SENSOR_IDS))
 
 # MQTT discovery retraction.
-# Discovery configs are published retained, so the broker keeps serving them until they are replaced
-# or cleared. A sensor that stops being applicable - a different inverter family, a shunt role that
-# is no longer configured - would otherwise stay in Home Assistant forever, showing a stale value.
-# Publishing an empty retained payload to its config topic clears the broker copy and tells Home
-# Assistant to delete the entity. This runs on every discovery, so no state has to be kept and no
-# information has to be read back from the broker.
-def retract_discovery(dev_name, stale_ids, MQTT_auth):
-    for stale_id in sorted(stale_ids):
+#
+# Discovery configs and sensor values are both published with the retain flag, so the broker stores
+# one message per topic and replays it to every new subscriber. The topics are per sensor, so a
+# configuration change publishes a different set of topics rather than replacing the previous one:
+# nothing overwrites the topics that no longer apply, and their retained messages survive a broker
+# restart. Home Assistant subscribes, receives old and new alike, and creates the union. That is why
+# a sensor which stops being applicable - a different inverter family, a shunt role that is no longer
+# configured - stays in Home Assistant showing a stale value, and why deleting the device there does
+# not help.
+#
+# MQTT discovery has no "this is the complete set" message. An empty retained payload on a topic is
+# the only way to clear the broker copy, and on a config topic it also tells Home Assistant to drop
+# the entity. Which sensors are stale can be worked out from the code alone, so this needs no state
+# file and never reads back from the broker.
+#
+# Removing entities is somebody's data, so it is opt-in: stale sensors are always reported, but they
+# are only cleared when MQTT_discovery_cleanup is enabled.
+discovery_cleanup_hint_logged = False
+
+def retract_discovery(dev_name, topic_prefix, stale_ids, MQTT_auth):
+    if not stale_ids:
+        return
+
+    stale_ids = sorted(stale_ids)
+
+    if MQTT_discovery_cleanup != 'true':
+        # Whether any of these actually exist in Home Assistant is unknowable without reading the
+        # broker back, which this deliberately does not do - on a new installation none of them ever
+        # existed. So report what is not published rather than claiming anything was orphaned.
+        global discovery_cleanup_hint_logged
+        logger.info(" HA sensors not published by this configuration for " + dev_name + ": " + ", ".join(stale_ids))
+        if not discovery_cleanup_hint_logged:
+            logger.info(" Any of these still shown in Home Assistant are left over from an earlier"
+                        " configuration. Set MQTT_discovery_cleanup=true in config.cfg to remove them")
+            discovery_cleanup_hint_logged = True
+        return
+
+    for stale_id in stale_ids:
+        # The config topic removes the entity, the state topic clears the value behind it. Without the
+        # second one a re-enabled sensor would show its previous reading until the next scan.
         config_topic = "homeassistant/sensor/" + dev_name + "/" + dev_name + "_" + stale_id + "/config"
+        state_topic  = topic_prefix + "/" + stale_id
         publish.single(config_topic, "", hostname=MQTT_broker, port=MQTT_port, auth=MQTT_auth, qos=0, retain=True)
+        publish.single(state_topic,  "", hostname=MQTT_broker, port=MQTT_port, auth=MQTT_auth, qos=0, retain=True)
         logger.debug(" HA sensor retracted: " + dev_name + "_" + stale_id)
 
 # MQTT Home Assistant discovery.
@@ -674,8 +710,8 @@ def publish_mqtt_discovery(detected_devices, MQTT_auth):
             display_name = "Outback Inverter " + str(dev_idx)
             topic_prefix = "outback/inverters/" + str(dev_idx)
 
-            names        = ["inverter_current", "charge_current", "buy_current", "sell_current", "battery_voltage", "battery_voltage_compensated", "ac_input", "ac_output", "ac_use", "operating_modes", "aux_relay", "error_flags", "warning_modes", "trafo_temp", "capacitor_temp", "fet_temp", "grid_input_mode", "charger_mode", "output_kwh", "buy_kwh", "sell_kwh", "charger_kwh"]
-            ids          = ["inverter_current", "charge_current", "buy_current", "sell_current", "battery_voltage", "battery_voltage_compensated", "ac_input", "ac_output", "ac_use", "operating_modes", "aux_relay", "error_flags", "warning_modes", "trafo_temp", "capacitor_temp", "fet_temp", "grid_input_mode", "charger_mode", "output_kwh", "buy_kwh", "sell_kwh", "charger_kwh"]
+            names        = FX_INVERTER_SENSOR_IDS
+            ids          = FX_INVERTER_SENSOR_IDS
             dev_cla      = ["current", "current", "current", "current", "voltage", "voltage", "voltage", "voltage", None, None, None, None, None, "temperature", "temperature", "temperature", None, None, "energy", "energy", "energy", "energy"]
             stat_cla     = ["measurement", "measurement", "measurement", "measurement", "measurement", "measurement", "measurement", "measurement", None, None, None, None, None, "measurement", "measurement", "measurement", None, None, "total_increasing", "total_increasing", "total_increasing", "total_increasing"]
             unit_of_meas = ["A", "A", "A", "A", "V", "V", "V", "V", None, None, None, None, None, "°C", "°C", "°C", None, None, "kWh", "kWh", "kWh", "kWh"]
@@ -702,8 +738,8 @@ def publish_mqtt_discovery(detected_devices, MQTT_auth):
 
         # An inverter device carries different sensors depending on its family, so anything this
         # family does not publish is cleared. The other device types have a fixed sensor set.
-        if dev_type in ("inverter", "split_inverter"):
-            retract_discovery(dev_name, set(INVERTER_SENSOR_IDS_ALL) - set(ids), MQTT_auth)
+        if dev_type in ("inverter", "fx_inverter", "split_inverter"):
+            retract_discovery(dev_name, topic_prefix, set(INVERTER_SENSOR_IDS_ALL) - set(ids), MQTT_auth)
 
         for n in range(len(ids)):
 
@@ -821,7 +857,7 @@ def publish_mqtt_discovery(detected_devices, MQTT_auth):
 
     # Clear the summary sensors this system does not have, including any left behind by an earlier
     # run with different hardware or a different shunt role configuration.
-    retract_discovery(dev_name, set(catalogue) - set(ids), MQTT_auth)
+    retract_discovery(dev_name, "outback/summary", set(catalogue) - set(ids), MQTT_auth)
 
     for n in range(len(ids)):
 

@@ -75,10 +75,12 @@ ReadMateStatus version history:
                    when roles are configured, so an installation that does not use them sees no JSON change
                  - note: shunt_<role>_current and shunt_<role>_power are both signed by role direction. The
                    legacy diverted_current keeps the raw FNDC sign it has always had
-                 - fix: MQTT discovery configs are published retained, so a sensor that stopped being applicable
-                   stayed in Home Assistant forever showing a stale value. Discovery now clears the config of
-                   every sensor it knows about but is not publishing, so changing shunt roles or inverter
-                   hardware no longer leaves orphaned entities behind. No broker read and no state file -
+                 - fix: MQTT discovery configs are published retained on a topic per sensor, so a sensor that
+                   stopped being applicable stayed in Home Assistant forever showing a stale value - a new
+                   configuration publishes different topics rather than replacing the old ones. Discovery now
+                   reports every sensor it knows about but is not publishing, and clears both its config and
+                   state topic when the new MQTT_discovery_cleanup option is enabled. Default is 'false', so
+                   nothing is removed from Home Assistant unless asked. No broker read and no state file -
                    the set of possible sensors is known from the code
 ------------------------------------------------------------------------------------------------------------------------
 ChangeMateStatus version history:
