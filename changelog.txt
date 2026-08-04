@@ -62,6 +62,26 @@ ReadMateStatus version history:
                  - add: scan now logs the SunSpec blocks it found and warns when no inverter block was decoded,
                    instead of skipping unsupported hardware in silence
                  - add: FX error and warning bitfields report every flag that is set, not just single bit values
+
+1.2.0_20260804   - fix: the summary assumed FNDC shunt C was always a diversion load, so diverted_current and
+                   diverted_power reported nonsense on any system using shunt C for something else
+                 - new: configurable shunt roles in config.cfg [Labels] - solar, charger, inverter, load,
+                   diverter, unused, other. Summary publishes shunt_<role>_current and shunt_<role>_power for
+                   each role in use. Leaving the roles blank keeps the previous behaviour
+                 - fix: configured shunt labels are now used for the Home Assistant sensor display names,
+                   instead of being written only to the JSON file. Entity ids and topics are unchanged
+                 - add: shunts declared unused are excluded from the calculated battery current
+                 - add: shunt roles reported in the JSON as shunt_a_role, shunt_b_role, shunt_c_role, but only
+                   when roles are configured, so an installation that does not use them sees no JSON change
+                 - note: shunt_<role>_current and shunt_<role>_power are both signed by role direction. The
+                   legacy diverted_current keeps the raw FNDC sign it has always had
+                 - fix: MQTT discovery configs are published retained on a topic per sensor, so a sensor that
+                   stopped being applicable stayed in Home Assistant forever showing a stale value - a new
+                   configuration publishes different topics rather than replacing the old ones. Discovery now
+                   reports every sensor it knows about but is not publishing, and clears both its config and
+                   state topic when the new MQTT_discovery_cleanup option is enabled. Default is 'false', so
+                   nothing is removed from Home Assistant unless asked. No broker read and no state file -
+                   the set of possible sensors is known from the code
 ------------------------------------------------------------------------------------------------------------------------
 ChangeMateStatus version history:
 =====================================
