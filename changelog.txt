@@ -82,6 +82,12 @@ ReadMateStatus version history:
                    state topic when the new MQTT_discovery_cleanup option is enabled. Default is 'false', so
                    nothing is removed from Home Assistant unless asked. No broker read and no state file -
                    the set of possible sensors is known from the code
+
+1.3.0_20260805   - refactor: applied the FX/VFX full-block decoder implementation to all remaining SunSpec
+                   blocks
+                 - refactor: standardized decoder logic across all supported SunSpec devices
+                 - compatibility: no changes to JSON, MQTT, Home Assistant or MariaDB interfaces
+
 ------------------------------------------------------------------------------------------------------------------------
 ChangeMateStatus version history:
 =====================================
