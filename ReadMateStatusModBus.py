@@ -11,7 +11,7 @@ import shutil
 import sys, os
 import re
 
-script_ver = "1.2.0_20260804"
+script_ver = "1.3.0_20260805"
 print ("script version: "+ script_ver)
 
 pathname               = os.path.dirname(sys.argv[0])
@@ -122,6 +122,7 @@ print("duplicate output active: ", duplicate_active)
 print("SQL active  :            ", SQL_active)
 print("MQTT active :            ", MQTT_active)
 print("MQTT discovery active:   ", MQTT_discovery_active)
+print("MQTT_discovery_cleanup:  ", MQTT_discovery_cleanup)
 print("daemon active:           ", daemon_active)
 print("scan frequency:          ", scan_frequency, "sec")
 
@@ -316,6 +317,20 @@ fx_grid_input_mode_list = ["GridTied", "Generator", "GridZero"]
 
 # FXconfig_Charger_Operating_Mode
 fx_charger_mode_list = ["Off", "Auto", "On"]
+
+# Shared lookup tables. The FX/VFX block already uses generic enum/flag decoders;
+# the same mechanism is reused by the Radian, charge controller and FNDC blocks.
+radian_grid_input_mode_list = ["Generator", "Support", "GridTied", "UPS", "Backup", "MiniGrid", "GridZero"]
+radian_charger_mode_list    = ["Off", "On"]
+cc_charge_mode_list         = ["Silent", "Float", "Bulk", "Absorb", "Equalize"]
+cc_aux_mode_list            = ["Float", "Diversion: Relay", "Diversion:SSR", "Low Batt Disconnect",
+                               "Remote", "Vent Fan", "PV Trigger", "Error Output", "Night Light"]
+cc_aux_state_list           = ["Disabled", "Enabled"]
+cc_fault_flags              = [(0x0010, "Fault Input Active"),
+                               (0x0020, "Shorted Battery Temp Sensor"),
+                               (0x0040, "Over Temp"),
+                               (0x0080, "High VOC")]
+fndc_shunt_enabled_list     = ["ON", "OFF"]
 
 # Decoder Class to replace BinaryPayloadDecoder that will be removed in pymodbus 3.9.0
 class SunSpecDecoder:
@@ -1004,7 +1019,10 @@ def main():
     split_inverters=0                              # used to count split phase inverters for conditional summary JSON
     fndc_detected=False                            # used to include FNDC/battery values in summary JSON only when FNDC exists
     detected_blocks=[]                             # used to report the SunSpec blocks seen during this scan
-    inverter_index_by_address={}                   # used to link a configuration block back to its own real time block
+    inverter_index_by_address={}                   # links inverter configuration blocks to real time blocks
+    charger_index_by_address={}                    # links charge controller configuration blocks to real time blocks
+    charger_data_by_address={}                     # stores charge controller real time values until its config block
+    fndc_data_by_address={}                        # stores FNDC real time values until its config block
     port=None                                      # HUB port of the block being decoded, reported by the error handlers
     reg = startReg
     for block in range(0, 30):
@@ -1017,13 +1035,17 @@ def main():
 
         try:        
             if "Split Phase Radian Inverter Real Time Block" in blockResult['DID']:
+                response = client.read_holding_registers(
+                    reg,
+                    count=blockResult["size"] + 2
+                )
+                radian_split = response.registers
                 logger.debug(".. Detected a Split Phase Radian Inverter Real Time Block")
                 inverters = inverters + 1
                 split_inverters = split_inverters + 1
-                response = client.read_holding_registers(reg + 2, count=1)
-                port=(response.registers[0]-1)
+                port=(radian_split[2]-1)
                 address=port+1
-                logger.debug(".... Connected on HUB port " + str(response.registers[0]))
+                logger.debug(".... Connected on HUB port " + str(radian_split[2]))
 
                 # MQTT discovery - register detected split phase inverter with HUB port label.
                 detected_devices.append({
@@ -1033,55 +1055,44 @@ def main():
                     "name"  : device_list[port]
                 })
                 logger.debug(".... HA device: Outback Inverter " + str(inverters))
+                inverter_index_by_address[address] = inverters
        
                 # Inverter L1 phase data
-                response = client.read_holding_registers(reg + 7, count=1)
-                gs_single_inverter_output_current = round(response.registers[0],2)
+                gs_single_inverter_output_current = round(radian_split[7],2)
                 logger.debug(".... GS L1 Inverted output current (A) " + str(gs_single_inverter_output_current))
                
-                response = client.read_holding_registers(reg + 8, count=1)
-                gs_single_inverter_charge_current = round(response.registers[0],2)
+                gs_single_inverter_charge_current = round(radian_split[8],2)
                 logger.debug(".... GS L1 Charger current (A) " + str(gs_single_inverter_charge_current))
                 
-                response = client.read_holding_registers(reg + 9, count=1)
-                gs_single_inverter_buy_current = round(response.registers[0],2)
+                gs_single_inverter_buy_current = round(radian_split[9],2)
                 logger.debug(".... GS L1 Input current (A) " + str(gs_single_inverter_buy_current))
                 
-                response = client.read_holding_registers(reg + 10, count=1)
-                GS_Single_Inverter_Sell_Current = round(response.registers[0],2)
+                GS_Single_Inverter_Sell_Current = round(radian_split[10],2)
                 logger.debug(".... GS L1 Sell current (A) " + str(GS_Single_Inverter_Sell_Current))
 
-                response = client.read_holding_registers(reg + 11, count=1)
-                gs_single_ac_input_voltage = round(response.registers[0],2)
+                gs_single_ac_input_voltage = round(radian_split[11],2)
                 logger.debug(".... GS L1 AC Input Voltage " + str(gs_single_ac_input_voltage))
 
-                response = client.read_holding_registers(reg + 13, count=1)
-                gs_single_output_ac_voltage = round(response.registers[0],2)
+                gs_single_output_ac_voltage = round(radian_split[13],2)
                 logger.debug(".... GS L1 Voltage Out (V) " + str(gs_single_output_ac_voltage))
                 
                 # Inverter L2 phase data
-                response = client.read_holding_registers(reg + 14, count=1)
-                gs_single_inverter_l2_output_current = round(response.registers[0],2)
+                gs_single_inverter_l2_output_current = round(radian_split[14],2)
                 logger.debug(".... GS L2 Inverted output current (A) " + str(gs_single_inverter_l2_output_current))
                
-                response = client.read_holding_registers(reg + 15, count=1)
-                gs_single_inverter_charge_l2_current = round(response.registers[0],2)
+                gs_single_inverter_charge_l2_current = round(radian_split[15],2)
                 logger.debug(".... GS L2 Charger current (A) " + str(gs_single_inverter_charge_l2_current))
                 
-                response = client.read_holding_registers(reg + 16, count=1)
-                gs_single_inverter_buy_l2_current = round(response.registers[0],2)
+                gs_single_inverter_buy_l2_current = round(radian_split[16],2)
                 logger.debug(".... GS L2 Buy current (A) " + str(gs_single_inverter_buy_l2_current))
                 
-                response = client.read_holding_registers(reg + 17, count=1)
-                GS_Single_Inverter_Sell_l2_Current = round(response.registers[0],2)
+                GS_Single_Inverter_Sell_l2_Current = round(radian_split[17],2)
                 logger.debug(".... GS L2 Sell current (A) " + str(GS_Single_Inverter_Sell_l2_Current))
 
-                response = client.read_holding_registers(reg + 18, count=1)
-                gs_single_ac_input_l2_voltage = round(response.registers[0],2)
+                gs_single_ac_input_l2_voltage = round(radian_split[18],2)
                 logger.debug(".... GS L2 AC Input Voltage " + str(gs_single_ac_input_l2_voltage))
 
-                response = client.read_holding_registers(reg + 20, count=1)
-                gs_single_output_ac_l2_voltage = round(response.registers[0],2)
+                gs_single_output_ac_l2_voltage = round(radian_split[20],2)
                 logger.debug(".... GS L2 Voltage Out (V) " + str(gs_single_output_ac_l2_voltage))
 
                 # Calculated summary - split phase inverter values are aggregated by phase.
@@ -1104,108 +1115,52 @@ def main():
                 charge_L1_total_power     += gs_single_inverter_charge_current * gs_single_ac_input_voltage
                 charge_L2_total_power     += gs_single_inverter_charge_l2_current * gs_single_ac_input_l2_voltage
 
-                response = client.read_holding_registers(reg + 21, count=1)
-                gs_single_inverter_operating_mode = int(response.registers[0])
-                operating_modes_list = [
-                "Off",                    # 0
-                "Searching",              # 1
-                "Inverting",              # 2
-                "Charging",               # 3
-                "Silent",                 # 4
-                "Float",                  # 5
-                "Equalize",               # 6
-                "Charger Off",            # 7
-                "Support",                # 8
-                "Sell",                   # 9
-                "Pass-through",           # 10
-                "Slave Inverter On",      # 11
-                "Slave Inverter Off",     # 12
-                "Unknown",                # 13
-                "Offsetting",             # 14
-                "AGS Error",              # 15
-                "Comm Error"]             # 16 
-                
-                operating_modes=operating_modes_list[gs_single_inverter_operating_mode]
+                gs_single_inverter_operating_mode = int(radian_split[21])
+                operating_modes = decode_enum(gs_single_inverter_operating_mode, fx_operating_modes_list, "Radian operating mode")
                 logger.debug(".... GS Inverter Operating Mode " + str(gs_single_inverter_operating_mode) +" "+ operating_modes)  
                 
-                response = client.read_holding_registers(reg + 38, count=1)
-                gs_single_ac_input_state = round(int(response.registers[0]),2)
-                ac_use_list = [
-                "AC Drop",
-                "AC Use"
-                ]
-                ac_use = ac_use_list[gs_single_ac_input_state]
+                gs_single_ac_input_state = round(int(radian_split[38]),2)
+                ac_use = decode_enum(gs_single_ac_input_state, fx_ac_use_list, "Radian AC input state")
                 logger.debug(".... GS AC USE (Y/N) " + str(gs_single_ac_input_state) + " " + ac_use)
                 
-                response = client.read_holding_registers(reg + 24, count=1)
-                gs_single_battery_voltage = round(int(response.registers[0]) * 0.1,1)
+                gs_single_battery_voltage = round(int(radian_split[24]) * 0.1,1)
                 logger.debug(".... GS Battery voltage (V) " + str(gs_single_battery_voltage))
                 
-                response = client.read_holding_registers(reg + 25, count=1)
-                gs_single_temp_compensated_target_voltage = round(int(response.registers[0]) * 0.1,2)
+                gs_single_temp_compensated_target_voltage = round(int(radian_split[25]) * 0.1,2)
                 logger.debug(".... GS Battery target voltage - temp compensated (V) " + str(gs_single_temp_compensated_target_voltage))
 
-                response = client.read_holding_registers(reg + 26, count=1)
-                GS_Single_AUX_Relay_Output_State = int(response.registers[0])
+                GS_Single_AUX_Relay_Output_State = int(radian_split[26])
                 logger.debug(".... GS Aux Relay state  " + str(GS_Single_AUX_Relay_Output_State))
-                aux_relay_list=["disabled","enabled"]
-                aux_relay=aux_relay_list[GS_Single_AUX_Relay_Output_State]
+                aux_relay = decode_enum(GS_Single_AUX_Relay_Output_State, fx_aux_relay_list, "Radian aux relay state")
 
-                response = client.read_holding_registers(reg + 28, count=1)
-                GS_Single_L_Module_Transformer_Temperature = int(response.registers[0])
+                GS_Single_L_Module_Transformer_Temperature = int(radian_split[28])
                 logger.debug(".... GS L Transformer Temperature  " + str(GS_Single_L_Module_Transformer_Temperature))
                 
-                response = client.read_holding_registers(reg + 29, count=1)
-                GS_Single_L_Module_Capacitor_Temperature = int(response.registers[0])
+                GS_Single_L_Module_Capacitor_Temperature = int(radian_split[29])
                 logger.debug(".... GS L Capacitor Temperature  " + str(GS_Single_L_Module_Capacitor_Temperature))
   
-                response = client.read_holding_registers(reg + 31, count=1)
-                GS_Single_R_Module_FET_Temperature = int(response.registers[0])
+                GS_Single_R_Module_FET_Temperature = int(radian_split[31])
                 logger.debug(".... GS L FET Temperature  " + str(GS_Single_R_Module_FET_Temperature))                  
 
-                response = client.read_holding_registers(reg + 32, count=1)
-                GS_Single_R_Module_Transformer_Temperature = int(response.registers[0])
+                GS_Single_R_Module_Transformer_Temperature = int(radian_split[32])
                 logger.debug(".... GS L Transformer Temperature  " + str(GS_Single_R_Module_Transformer_Temperature))
                 
-                response = client.read_holding_registers(reg + 33, count=1)
-                GS_Single_R_Module_Capacitor_Temperature = int(response.registers[0])
+                GS_Single_R_Module_Capacitor_Temperature = int(radian_split[33])
                 logger.debug(".... GS L Capacitor Temperature  " + str(GS_Single_R_Module_Capacitor_Temperature))
  
-                response = client.read_holding_registers(reg + 30, count=1)
-                GS_Single_L_Module_FET_Temperature = int(response.registers[0])
+                GS_Single_L_Module_FET_Temperature = int(radian_split[30])
                 logger.debug(".... GS L FET Temperature  " + str(GS_Single_L_Module_FET_Temperature))    
 
-                response = client.read_holding_registers(reg + 34, count=1)
-                gs_single_battery_temperature = decode_int16(int(response.registers[0]))
+                gs_single_battery_temperature = decode_int16(int(radian_split[34]))
                 logger.debug(".... GS Battery temperature (V) " + str(gs_single_battery_temperature))
                
-                response = client.read_holding_registers(reg + 22, count=1)
-                GS_Split_Error_Flags = int(response.registers[0])
+                GS_Split_Error_Flags = int(radian_split[22])
                 logger.debug(".... GS Error Flags " + str(GS_Split_Error_Flags))
-                error_flags='None'
-                if GS_Split_Error_Flags == 0:   error_flags='Nothing'                
-                if GS_Split_Error_Flags == 1:   error_flags='Low AC output voltage'
-                if GS_Split_Error_Flags == 2:   error_flags='Stacking error'               
-                if GS_Split_Error_Flags == 4:   error_flags='Over temperature error'
-                if GS_Split_Error_Flags == 8:   error_flags='Low battery voltage'               
-                if GS_Split_Error_Flags == 16:  error_flags='Phase loss'                
-                if GS_Split_Error_Flags == 32:  error_flags='High battery voltage'
-                if GS_Split_Error_Flags == 64:  error_flags='AC output shorted'               
-                if GS_Split_Error_Flags == 128: error_flags='AC backfeed'
+                error_flags = decode_flags(GS_Split_Error_Flags, fx_error_flags)
                 
-                response = client.read_holding_registers(reg + 23, count=1)
-                GS_Single_Warning_Flags = int(response.registers[0])
+                GS_Single_Warning_Flags = int(radian_split[23])
                 logger.debug(".... GS Warning Flags " + str(GS_Single_Warning_Flags))
-                warning_flags='None'
-                if GS_Single_Warning_Flags == 0:   warning_flags='Nothing'                
-                if GS_Single_Warning_Flags == 1:   warning_flags='AC input frequency too high'
-                if GS_Single_Warning_Flags == 2:   warning_flags='AC input frequency too low'               
-                if GS_Single_Warning_Flags == 4:   warning_flags='AC input voltage too low'
-                if GS_Single_Warning_Flags == 8:   warning_flags='AC input voltage too high'               
-                if GS_Single_Warning_Flags == 16:  warning_flags='AC input current exceeds max'                
-                if GS_Single_Warning_Flags == 32:  warning_flags='Temperature sensor bad' 
-                if GS_Single_Warning_Flags == 64:  warning_flags='Communications error'               
-                if GS_Single_Warning_Flags == 128: warning_flags='Cooling fan fault'                
+                warning_flags = decode_flags(GS_Single_Warning_Flags, fx_warning_flags)
 
                 # GS data - JSON preparation
                 devices_array={
@@ -1276,13 +1231,17 @@ def main():
 
         try:        
             if "Single Phase Radian Inverter Real Time Block" in blockResult['DID']:
+                response = client.read_holding_registers(
+                    reg,
+                    count=blockResult["size"] + 2
+                )
+                radian_single = response.registers
                 logger.debug(".. Detected a Single Phase Radian Inverter Real Time Block")
                 inverters = inverters + 1
                 single_inverters = single_inverters + 1
-                response = client.read_holding_registers(reg + 2, count=1)
-                port=(response.registers[0]-1)
+                port=(radian_single[2]-1)
                 address=port+1
-                logger.debug(".... Connected on HUB port " + str(response.registers[0]))
+                logger.debug(".... Connected on HUB port " + str(radian_single[2]))
 
                 # MQTT discovery - register detected inverter with HUB port label.
                 detected_devices.append({
@@ -1292,30 +1251,25 @@ def main():
                     "name"  : device_list[port]
                 })
                 logger.debug(".... HA device: Outback Inverter " + str(inverters))
+                inverter_index_by_address[address] = inverters
        
                 # Inverter Output current
-                response = client.read_holding_registers(reg + 7, count=1)
-                gs_single_inverter_output_current = round(response.registers[0],2)
+                gs_single_inverter_output_current = round(radian_single[7],2)
                 logger.debug(".... FXR Inverted output current (A) " + str(gs_single_inverter_output_current))
                
-                response = client.read_holding_registers(reg + 8, count=1)
-                gs_single_inverter_charge_current = round(response.registers[0],2)
+                gs_single_inverter_charge_current = round(radian_single[8],2)
                 logger.debug(".... FXR Charger current (A) " + str(gs_single_inverter_charge_current))
                 
-                response = client.read_holding_registers(reg + 9, count=1)
-                gs_single_inverter_buy_current = round(response.registers[0],2)
+                gs_single_inverter_buy_current = round(radian_single[9],2)
                 logger.debug(".... FXR Input current (A) " + str(gs_single_inverter_buy_current))
                 
-                response = client.read_holding_registers(reg + 30, count=1)
-                gs_single_ac_input_voltage = round(response.registers[0],2)
+                gs_single_ac_input_voltage = round(radian_single[30],2)
                 logger.debug(".... FXR AC Input Voltage " + str(gs_single_ac_input_voltage))
 
-                response = client.read_holding_registers(reg + 13, count=1)
-                gs_single_output_ac_voltage = round(response.registers[0],2)
+                gs_single_output_ac_voltage = round(radian_single[13],2)
                 logger.debug(".... FXR Voltage Out (V) " + str(gs_single_output_ac_voltage))
                 
-                response = client.read_holding_registers(reg + 10, count=1)
-                GS_Single_Inverter_Sell_Current = round(response.registers[0],2)
+                GS_Single_Inverter_Sell_Current = round(radian_single[10],2)
                 logger.debug(".... FXR Sell current (A) " + str(GS_Single_Inverter_Sell_Current))
 
                 # Calculated summary - single phase inverter currents.
@@ -1325,96 +1279,43 @@ def main():
                 sell_total_power       += GS_Single_Inverter_Sell_Current * gs_single_ac_input_voltage
                 inverter_charge_total_current   += gs_single_inverter_charge_current
                
-                response = client.read_holding_registers(reg + 14, count=1)
-                gs_single_inverter_operating_mode = int(response.registers[0])
-                operating_modes_list = [
-                "Off",                    # 0
-                "Searching",              # 1
-                "Inverting",              # 2
-                "Charging",               # 3
-                "Silent",                 # 4
-                "Float",                  # 5
-                "Equalize",               # 6
-                "Charger Off",            # 7
-                "Support",                # 8
-                "Sell",                   # 9
-                "Pass-through",           # 10
-                "Slave Inverter On",      # 11
-                "Slave Inverter Off",     # 12
-                "Unknown",                # 13
-                "Offsetting",             # 14
-                "AGS Error",              # 15
-                "Comm Error"]             # 16 
-                
-                operating_modes=operating_modes_list[gs_single_inverter_operating_mode]
+                gs_single_inverter_operating_mode = int(radian_single[14])
+                operating_modes = decode_enum(gs_single_inverter_operating_mode, fx_operating_modes_list, "Radian operating mode")
                 logger.debug(".... FXR Inverter Operating Mode " + str(gs_single_inverter_operating_mode) +" "+ operating_modes)  
                 
-                response = client.read_holding_registers(reg + 31, count=1)
-                gs_single_ac_input_state = round(int(response.registers[0]),2)
-                ac_use_list = [
-                "AC Drop",
-                "AC Use"
-                ]
-                ac_use = ac_use_list[gs_single_ac_input_state]
+                gs_single_ac_input_state = round(int(radian_single[31]),2)
+                ac_use = decode_enum(gs_single_ac_input_state, fx_ac_use_list, "Radian AC input state")
                 logger.debug(".... FXR AC USE (Y/N) " + str(gs_single_ac_input_state) + " " + ac_use)
                 
-                response = client.read_holding_registers(reg + 17, count=1)
-                gs_single_battery_voltage = round(int(response.registers[0]) * 0.1,1)
+                gs_single_battery_voltage = round(int(radian_single[17]) * 0.1,1)
                 logger.debug(".... FXR Battery voltage (V) " + str(gs_single_battery_voltage))
                 
-                response = client.read_holding_registers(reg + 18, count=1)
-                gs_single_temp_compensated_target_voltage = round(int(response.registers[0]) * 0.1,2)
+                gs_single_temp_compensated_target_voltage = round(int(radian_single[18]) * 0.1,2)
                 logger.debug(".... FXR Battery target voltage - temp compensated (V) " + str(gs_single_temp_compensated_target_voltage))
 
-                response = client.read_holding_registers(reg + 19, count=1)
-                GS_Single_AUX_Relay_Output_State = int(response.registers[0])
+                GS_Single_AUX_Relay_Output_State = int(radian_single[19])
                 logger.debug(".... FXR Aux Relay state  " + str(GS_Single_AUX_Relay_Output_State))
-                aux_relay_list=["disabled","enabled"]
-                aux_relay=aux_relay_list[GS_Single_AUX_Relay_Output_State]
+                aux_relay = decode_enum(GS_Single_AUX_Relay_Output_State, fx_aux_relay_list, "Radian aux relay state")
 
-                response = client.read_holding_registers(reg + 21, count=1)
-                GS_Single_L_Module_Transformer_Temperature = int(response.registers[0])
+                GS_Single_L_Module_Transformer_Temperature = int(radian_single[21])
                 logger.debug(".... FXR L Transformer Temperature  " + str(GS_Single_L_Module_Transformer_Temperature))
                 
-                response = client.read_holding_registers(reg + 22, count=1)
-                GS_Single_L_Module_Capacitor_Temperature = int(response.registers[0])
+                GS_Single_L_Module_Capacitor_Temperature = int(radian_single[22])
                 logger.debug(".... FXR L Capacitor Temperature  " + str(GS_Single_L_Module_Capacitor_Temperature))
                 
-                response = client.read_holding_registers(reg + 23, count=1)
-                GS_Single_L_Module_FET_Temperature = int(response.registers[0])
+                GS_Single_L_Module_FET_Temperature = int(radian_single[23])
                 logger.debug(".... FXR L FET Temperature  " + str(GS_Single_L_Module_FET_Temperature))                  
 
-                response = client.read_holding_registers(reg + 27, count=1)
-                gs_single_battery_temperature = decode_int16(int(response.registers[0]))
+                gs_single_battery_temperature = decode_int16(int(radian_single[27]))
                 logger.debug(".... FXR Battery temperature (V) " + str(gs_single_battery_temperature))
                
-                response = client.read_holding_registers(reg + 15, count=1)
-                GS_Split_Error_Flags = int(response.registers[0])
+                GS_Split_Error_Flags = int(radian_single[15])
                 logger.debug(".... FXR Error Flags " + str(GS_Split_Error_Flags))
-                error_flags='None'
-                if GS_Split_Error_Flags == 0:   error_flags='Nothing'                
-                if GS_Split_Error_Flags == 1:   error_flags='Low AC output voltage'
-                if GS_Split_Error_Flags == 2:   error_flags='Stacking error'               
-                if GS_Split_Error_Flags == 4:   error_flags='Over temperature error'
-                if GS_Split_Error_Flags == 8:   error_flags='Low battery voltage'               
-                if GS_Split_Error_Flags == 16:  error_flags='Phase loss'                
-                if GS_Split_Error_Flags == 32:  error_flags='High battery voltage'
-                if GS_Split_Error_Flags == 64:  error_flags='AC output shorted'               
-                if GS_Split_Error_Flags == 128: error_flags='AC backfeed'
+                error_flags = decode_flags(GS_Split_Error_Flags, fx_error_flags)
                 
-                response = client.read_holding_registers(reg + 16, count=1)
-                GS_Single_Warning_Flags = int(response.registers[0])
+                GS_Single_Warning_Flags = int(radian_single[16])
                 logger.debug(".... FXR Warning Flags " + str(GS_Single_Warning_Flags))
-                warning_flags='None'
-                if GS_Single_Warning_Flags == 0:   warning_flags='Nothing'                
-                if GS_Single_Warning_Flags == 1:   warning_flags='AC input frequency too high'
-                if GS_Single_Warning_Flags == 2:   warning_flags='AC input frequency too low'               
-                if GS_Single_Warning_Flags == 4:   warning_flags='AC input voltage too low'
-                if GS_Single_Warning_Flags == 8:   warning_flags='AC input voltage too high'               
-                if GS_Single_Warning_Flags == 16:  warning_flags='AC input current exceeds max'                
-                if GS_Single_Warning_Flags == 32:  warning_flags='Temperature sensor bad' 
-                if GS_Single_Warning_Flags == 64:  warning_flags='Communications error'               
-                if GS_Single_Warning_Flags == 128: warning_flags='Cooling fan fault'                
+                warning_flags = decode_flags(GS_Single_Warning_Flags, fx_warning_flags)
 
                 # FXR data - JSON preparation
                 devices_array={
@@ -1477,41 +1378,43 @@ def main():
         
         try:
             if "Radian Inverter Configuration Block" in blockResult['DID']:
-                response = client.read_holding_registers(reg + 26, count=1)
-                GSconfig_Grid_Input_Mode = int(response.registers[0])
-                logger.debug(".... FXR Grid input Mode " + str(GSconfig_Grid_Input_Mode))
-                grid_input_mode='None'
-                if GSconfig_Grid_Input_Mode == 0:   grid_input_mode ='Generator'
-                if GSconfig_Grid_Input_Mode == 1:   grid_input_mode ='Support'               
-                if GSconfig_Grid_Input_Mode == 2:   grid_input_mode ='GridTied'
-                if GSconfig_Grid_Input_Mode == 3:   grid_input_mode ='UPS'               
-                if GSconfig_Grid_Input_Mode == 4:   grid_input_mode ='Backup'                
-                if GSconfig_Grid_Input_Mode == 5:   grid_input_mode ='MiniGrid' 
-                if GSconfig_Grid_Input_Mode == 6:   grid_input_mode ='GridZero'
-                
-                response = client.read_holding_registers(reg + 24, count=1)
-                GSconfig_Charger_Operating_Mode = int(response.registers[0])
-                logger.debug(".... FXR Charger Mode " + str(GSconfig_Charger_Operating_Mode))
-                charger_mode='None'
-                if GSconfig_Charger_Operating_Mode == 0:   charger_mode ='Off'
-                if GSconfig_Charger_Operating_Mode == 1:   charger_mode ='On'
+                response = client.read_holding_registers(
+                    reg,
+                    count=blockResult["size"] + 2
+                )
+                radian_config = response.registers
+                config_address = int(radian_config[2])
+                radian_index = inverter_index_by_address.get(config_address)
 
-                # FXR dataconfig - JSON preparation
-                various_array={
-                  "address": address,
-                  "device_id": 5,
-                  "grid_input_mode": grid_input_mode,
-                  "charger_mode": charger_mode
-                  }
-                various.append(various_array)     # append FXR data to devices
-                devices[address-1]["grid_input_mode"] = grid_input_mode
-                devices[address-1]["charger_mode"] = charger_mode
-                
-                # FXR dataconfig - Mqtt preparation
-                mqtt_devices.append(
-                        {"outback/inverters/" + str(inverters) + "/grid_input_mode":grid_input_mode,
-                         "outback/inverters/" + str(inverters) + "/charger_mode"   :charger_mode})
-     
+                if radian_index is None:
+                    logger.warning(".. Radian Inverter Configuration Block on HUB port " + str(config_address) + " has no matching real time block. Skipped")
+                else:
+                    GSconfig_Grid_Input_Mode = int(radian_config[26])
+                    grid_input_mode = decode_enum(GSconfig_Grid_Input_Mode, radian_grid_input_mode_list, "Radian grid input mode")
+                    logger.debug(".... FXR Grid input Mode " + str(GSconfig_Grid_Input_Mode) + " " + grid_input_mode)
+
+                    GSconfig_Charger_Operating_Mode = int(radian_config[24])
+                    charger_mode = decode_enum(GSconfig_Charger_Operating_Mode, radian_charger_mode_list, "Radian charger operating mode")
+                    logger.debug(".... FXR Charger Mode " + str(GSconfig_Charger_Operating_Mode) + " " + charger_mode)
+
+                    various_array={
+                      "address": config_address,
+                      "device_id": 5,
+                      "grid_input_mode": grid_input_mode,
+                      "charger_mode": charger_mode
+                      }
+                    various.append(various_array)
+
+                    for device in devices:
+                        if device.get("address") == config_address and device.get("device_id") == 5:
+                            device["grid_input_mode"] = grid_input_mode
+                            device["charger_mode"] = charger_mode
+                            break
+
+                    mqtt_devices.append(
+                            {"outback/inverters/" + str(radian_index) + "/grid_input_mode":grid_input_mode,
+                             "outback/inverters/" + str(radian_index) + "/charger_mode"   :charger_mode})
+
         except Exception as e:
             logger.warning("port: " + str(port) + " FXR config block " + str(e))
 
@@ -1735,12 +1638,16 @@ def main():
 
         try:
             if "Charge Controller Block" in blockResult['DID']:
+                response = client.read_holding_registers(
+                    reg,
+                    count=blockResult["size"] + 2
+                )
+                charger = response.registers
                 logger.debug(".. Detected a Charge Controller Block")
                 chargers = chargers +1
 
-                response = client.read_holding_registers(reg + 2, count=1)
-                logger.debug(".... Connected on HUB port " + str(response.registers[0]))
-                port=(response.registers[0]-1)
+                logger.debug(".... Connected on HUB port " + str(charger[2]))
+                port=(charger[2]-1)
                 address=port+1
 
                 # MQTT discovery - register detected charge controller with HUB port label.
@@ -1752,38 +1659,29 @@ def main():
                 })
                 logger.debug(".... HA device: Outback " + str(device_list[port]).strip())
      
-                response = client.read_holding_registers(reg + 10, count=1)
-                cc_batt_current = round(int(response.registers[0]) * 0.1,2)    # correction value *0.1
+                cc_batt_current = round(int(charger[10]) * 0.1,2)    # correction value *0.1
                 logger.debug(".... CC Battery Current (A) " + str(cc_batt_current))
      
-                response = client.read_holding_registers(reg + 11, count=1)
-                cc_array_current = round(int(response.registers[0]),2)
+                cc_array_current = round(int(charger[11]),2)
                 logger.debug(".... CC Array Current (A) " + str(cc_array_current))
                 
-                response = client.read_holding_registers(reg + 9, count=1)
-                cc_array_voltage = round(int(response.registers[0]) * 0.1,2)
+                cc_array_voltage = round(int(charger[9]) * 0.1,2)
                 logger.debug(".... CC Array Voltage " + str(cc_array_voltage))
                 
-                response = client.read_holding_registers(reg + 18, count=1)
-                CC_Todays_KW = round(int(response.registers[0]) * 0.1,2)
+                CC_Todays_KW = round(int(charger[18]) * 0.1,2)
                 logger.debug(".... CC Daily_KW (KW) " + str(CC_Todays_KW))
                 
-                response = client.read_holding_registers(reg + 13, count=1)
-                CC_Watts = round(int(response.registers[0]),2)
+                CC_Watts = round(int(charger[13]),2)
                 logger.debug(".... CC Actual_watts (W) " + str(CC_Watts))
 
-                response = client.read_holding_registers(reg + 12, count=1)
-                cc_charger_state = round(int(response.registers[0]),2)
+                cc_charger_state = round(int(charger[12]),2)
                 logger.debug(".... CC Charger State " + str(cc_charger_state))  # 0=Silent,1=Float,2=Bulk,3=Absorb,4=EQ
-                cc_mode_list=["Silent","Float","Bulk","Absorb","Equalize"]
-                cc_mode=cc_mode_list[cc_charger_state]
+                cc_mode = decode_enum(cc_charger_state, cc_charge_mode_list, "charge controller state")
      
-                response = client.read_holding_registers(reg + 8, count=1)
-                cc_batt_voltage = round(int(response.registers[0]) * 0.1,2)
+                cc_batt_voltage = round(int(charger[8]) * 0.1,2)
                 logger.debug(".... CC Battery Voltage (V) " + str(cc_batt_voltage))
      
-                response = client.read_holding_registers(reg + 19, count=1)
-                CC_Todays_AH = round(int(response.registers[0]),2)
+                CC_Todays_AH = round(int(charger[19]),2)
                 logger.debug(".... CC Daily_AH (A) " + str(CC_Todays_AH))
 
                 # Calculated summary - charger / PV totals.
@@ -1791,39 +1689,55 @@ def main():
                 pv_daily_kwh          += CC_Todays_KW
                 pv_total_current      += cc_array_current
                 chargers_total_current += cc_batt_current
+
+                charger_index_by_address[address] = chargers
+                charger_data_by_address[address] = {
+                    "charger_current": cc_batt_current,
+                    "pv_current": cc_array_current,
+                    "pv_voltage": cc_array_voltage,
+                    "pv_power": CC_Watts,
+                    "charge_mode": cc_mode,
+                    "battery_voltage": cc_batt_voltage,
+                    "daily_ah": CC_Todays_AH,
+                    "daily_kwh": CC_Todays_KW
+                }
           
             if "Charge Controller Configuration block" in blockResult['DID']:           #some CC parameters are in configuration block
+                response = client.read_holding_registers(
+                    reg,
+                    count=blockResult["size"] + 2
+                )
+                charger_config = response.registers
                 logger.debug(".. Charge Controller Configuration block")
-                response = client.read_holding_registers(reg + 2, count=1)
-                logger.debug(".... Connected on HUB port " + str(response.registers[0]))
-                port=(response.registers[0]-1)
+                logger.debug(".... Connected on HUB port " + str(charger_config[2]))
+                port=(charger_config[2]-1)
+                address=port+1
+                charger_index = charger_index_by_address.get(address)
+                charger_data = charger_data_by_address.get(address)
+                if charger_index is None or charger_data is None:
+                    raise RuntimeError("Charge Controller Configuration Block has no matching real time block on HUB port " + str(address))
+
+                cc_batt_current = charger_data["charger_current"]
+                cc_array_current = charger_data["pv_current"]
+                cc_array_voltage = charger_data["pv_voltage"]
+                CC_Watts = charger_data["pv_power"]
+                cc_mode = charger_data["charge_mode"]
+                cc_batt_voltage = charger_data["battery_voltage"]
+                CC_Todays_AH = charger_data["daily_ah"]
+                CC_Todays_KW = charger_data["daily_kwh"]
                 
-                response = client.read_holding_registers(reg + 32, count=1)
-                CCconfig_AUX_Mode   = int(response.registers[0])
+                CCconfig_AUX_Mode   = int(charger_config[32])
                 logger.debug(".... CC Aux Mode " + str(CCconfig_AUX_Mode))
               
-                aux_mode_list=["Float","Diversion: Relay","Diversion:SSR","Low Batt Disconnect",
-                          "Remote","Vent Fan","PV Trigger","Error Output","Night Light"]                                         # 0 disabled, 1 enabled 
-                aux_mode=aux_mode_list[CCconfig_AUX_Mode ]
+                aux_mode = decode_enum(CCconfig_AUX_Mode, cc_aux_mode_list, "charge controller AUX mode")
                 
-                response = client.read_holding_registers(reg + 34, count=1)
-                CCconfig_AUX_State  = int(response.registers[0])
+                CCconfig_AUX_State  = int(charger_config[34])
                 logger.debug(".... CC Aux State " + str(CCconfig_AUX_State))
-                aux_state_list=[
-                "Disabled",     # 0 - disabled
-                "Enabled"       # 1 - Enabled
-                ]                                         
-                aux_state=aux_state_list[CCconfig_AUX_State]
+                aux_state = decode_enum(CCconfig_AUX_State, cc_aux_state_list, "charge controller AUX state")
                 
-                response = client.read_holding_registers(reg + 9, count=1)
-                CCconfig_Faults = int(response.registers[0])
+                CCconfig_Faults = int(charger_config[9])
                 logger.debug(".... CC Error Flags " + str(CCconfig_Faults))
-                error_flags='None'            
-                if CCconfig_Faults == 0:   error_flags='Nothing' 
-                if CCconfig_Faults == 16:  error_flags='Fault Input Active'                
-                if CCconfig_Faults == 32:  error_flags='Shorted Battery Temp Sensor'
-                if CCconfig_Faults == 64:  error_flags='Over Temp'               
-                if CCconfig_Faults == 128: error_flags='High VOC'
+                error_flags = decode_flags(CCconfig_Faults, cc_fault_flags)
 
                 # Controlers data - JSON preparation
                 devices_array= {
@@ -1854,17 +1768,17 @@ def main():
                 
                 #controlers data - MQTT data preparation
                 mqtt_devices.append({
-                    "outback/chargers/" + str(chargers) + "/charger_current" :cc_batt_current,
-                    "outback/chargers/" + str(chargers) + "/pv_current"     :cc_array_current,
-                    "outback/chargers/" + str(chargers) + "/pv_voltage"     :cc_array_voltage,
-                    "outback/chargers/" + str(chargers) + "/pv_power"       :CC_Watts,
-                    "outback/chargers/" + str(chargers) + "/aux"            :aux_mode,
-                    "outback/chargers/" + str(chargers) + "/aux_mode"       :aux_state,
-                    "outback/chargers/" + str(chargers) + "/error_modes"    :error_flags,
-                    "outback/chargers/" + str(chargers) + "/battery_voltage":cc_batt_voltage,
-                    "outback/chargers/" + str(chargers) + "/daily_ah"       :CC_Todays_AH,
-                    "outback/chargers/" + str(chargers) + "/daily_kwh"      :CC_Todays_KW,
-                    "outback/chargers/" + str(chargers) + "/charge_mode"    :cc_mode
+                    "outback/chargers/" + str(charger_index) + "/charger_current" :cc_batt_current,
+                    "outback/chargers/" + str(charger_index) + "/pv_current"     :cc_array_current,
+                    "outback/chargers/" + str(charger_index) + "/pv_voltage"     :cc_array_voltage,
+                    "outback/chargers/" + str(charger_index) + "/pv_power"       :CC_Watts,
+                    "outback/chargers/" + str(charger_index) + "/aux"            :aux_mode,
+                    "outback/chargers/" + str(charger_index) + "/aux_mode"       :aux_state,
+                    "outback/chargers/" + str(charger_index) + "/error_modes"    :error_flags,
+                    "outback/chargers/" + str(charger_index) + "/battery_voltage":cc_batt_voltage,
+                    "outback/chargers/" + str(charger_index) + "/daily_ah"       :CC_Todays_AH,
+                    "outback/chargers/" + str(charger_index) + "/daily_kwh"      :CC_Todays_KW,
+                    "outback/chargers/" + str(charger_index) + "/charge_mode"    :cc_mode
                     })                 
         
         except Exception as e:
@@ -1872,11 +1786,15 @@ def main():
 
         try:
             if "FLEXnet-DC Real Time Block" in blockResult['DID']:
+                response = client.read_holding_registers(
+                    reg,
+                    count=blockResult["size"] + 2
+                )
+                fndc = response.registers
                 logger.debug(".. Detect a FLEXnet-DC Real Time Block")
 
-                response = client.read_holding_registers(reg + 2, count=1)
-                logger.debug(".... Connected on HUB port " + str(response.registers[0]))
-                port=(response.registers[0]-1)
+                logger.debug(".... Connected on HUB port " + str(fndc[2]))
+                port=(fndc[2]-1)
                 address=port+1
                 fndc_detected=True
 
@@ -1889,20 +1807,16 @@ def main():
                 })
                 logger.debug(".... HA device: Outback " + str(device_list[port]).strip())
 
-                response = client.read_holding_registers(reg + 8, count=1)
-                fn_shunt_a_current = round(decode_int16(int(response.registers[0])) * 0.1,2)
+                fn_shunt_a_current = round(decode_int16(int(fndc[8])) * 0.1,2)
                 logger.debug(".... FN Shunt A Current (A) " + str(fn_shunt_a_current))
                 
-                response = client.read_holding_registers(reg + 9, count=1)
-                fn_shunt_b_current = round(decode_int16(response.registers[0]) * 0.1,2)
+                fn_shunt_b_current = round(decode_int16(fndc[9]) * 0.1,2)
                 logger.debug(".... FN Shunt B Current (A) " + str(fn_shunt_b_current))
                
-                response = client.read_holding_registers(reg + 10, count=1)
-                fn_shunt_c_current = round(decode_int16(int(response.registers[0])) * 0.1,2)
+                fn_shunt_c_current = round(decode_int16(int(fndc[10])) * 0.1,2)
                 logger.debug(".... FN Shunt C Current (A) " + str(fn_shunt_c_current))
 
-                response = client.read_holding_registers(reg + 11, count=1)
-                fn_battery_voltage = round(int(response.registers[0]) * 0.1,2)
+                fn_battery_voltage = round(int(fndc[11]) * 0.1,2)
                 logger.debug(".... FN Battery Voltage " + str(fn_battery_voltage))
 
                 # Calculated summary - battery values based on FNDC shunts.
@@ -1943,12 +1857,10 @@ def main():
                     diverted_current = shunt_role_raw_current['diverter']
                     diverted_power   = shunt_role_power['diverter']
 
-                response = client.read_holding_registers(reg + 27, count=1)
-                fn_state_of_charge = int(response.registers[0])
+                fn_state_of_charge = int(fndc[27])
                 logger.debug(".... FN State of Charge " + str(fn_state_of_charge))
                 
-                response = client.read_holding_registers(reg + 14, count=1)
-                FN_Status_Flags  = int(response.registers[0])
+                FN_Status_Flags  = int(fndc[14])
                 logger.debug(".... FN Status Flag " + str(FN_Status_Flags))
                 charge_params_met="false"
                 if FN_Status_Flags==2 or FN_Status_Flags==6 or FN_Status_Flags==7:
@@ -1963,101 +1875,130 @@ def main():
                     relay_mode="manual"              
                 logger.debug(".... FN Relay Mode " + str(FN_Status_Flags ) + " " + relay_mode)
 
-                response = client.read_holding_registers(reg + 13, count=1)
-                fn_battery_temperature = decode_int16(int(response.registers[0]))
+                fn_battery_temperature = decode_int16(int(fndc[13]))
                 logger.debug(".... FN Battery Temperature " + str(fn_battery_temperature))
 
-                response = client.read_holding_registers(reg + 15, count=1)
-                FN_Shunt_A_Accumulated_AH = round(decode_int16(int(response.registers[0])),2)
+                FN_Shunt_A_Accumulated_AH = round(decode_int16(int(fndc[15])),2)
                 logger.debug(".... FN FN_Shunt_A_Accumulated_AH " + str(FN_Shunt_A_Accumulated_AH))
 
-                response = client.read_holding_registers(reg + 16, count=1)
-                FN_Shunt_A_Accumulated_kWh = round(decode_int16(int(response.registers[0])) * 0.01,2)
+                FN_Shunt_A_Accumulated_kWh = round(decode_int16(int(fndc[16])) * 0.01,2)
                 logger.debug(".... FN FN_Shunt_A_Accumulated_kWh " + str(FN_Shunt_A_Accumulated_kWh))
 
-                response = client.read_holding_registers(reg + 17, count=1)
-                FN_Shunt_B_Accumulated_AH = round(decode_int16(int(response.registers[0])),2)
+                FN_Shunt_B_Accumulated_AH = round(decode_int16(int(fndc[17])),2)
                 logger.debug(".... FN FN_Shunt_B_Accumulated_AH " + str(FN_Shunt_B_Accumulated_AH))
 
-                response = client.read_holding_registers(reg + 18, count=1)
-                FN_Shunt_B_Accumulated_kWh = round(decode_int16(int(response.registers[0])) * 0.01,2)
+                FN_Shunt_B_Accumulated_kWh = round(decode_int16(int(fndc[18])) * 0.01,2)
                 logger.debug(".... FN FN_Shunt_B_Accumulated_kWh " + str(FN_Shunt_B_Accumulated_kWh))
                      
-                response = client.read_holding_registers(reg + 19, count=1)
-                FN_Shunt_C_Accumulated_AH = round(decode_int16(int(response.registers[0])),2)
+                FN_Shunt_C_Accumulated_AH = round(decode_int16(int(fndc[19])),2)
                 logger.debug(".... FN FN_Shunt_C_Accumulated_AH " + str(FN_Shunt_C_Accumulated_AH))
 
-                response = client.read_holding_registers(reg + 20, count=1)
-                FN_Shunt_C_Accumulated_kWh = round(decode_int16(int(response.registers[0])) * 0.01,2)
+                FN_Shunt_C_Accumulated_kWh = round(decode_int16(int(fndc[20])) * 0.01,2)
                 logger.debug(".... FN FN_Shunt_C_Accumulated_kWh " + str(FN_Shunt_C_Accumulated_kWh))
                 
-                response = client.read_holding_registers(reg + 26, count=1)
-                FN_Days_Since_Charge_Parameters_Met = round(int((response.registers[0])) * 0.1,2)
+                FN_Days_Since_Charge_Parameters_Met = round(int((fndc[26])) * 0.1,2)
                 logger.debug(".... FN days_since_full " + str(FN_Days_Since_Charge_Parameters_Met))
                 
-                response = client.read_holding_registers(reg + 28, count=1)
-                FN_Todays_Minimum_SOC = int(response.registers[0])
+                FN_Todays_Minimum_SOC = int(fndc[28])
                 logger.debug(".... FN Todays_Minimum_SOC " + str(FN_Todays_Minimum_SOC))
 
-                response = client.read_holding_registers(reg + 29, count=1)
-                FN_Todays_Maximum_SOC = int(response.registers[0])
+                FN_Todays_Maximum_SOC = int(fndc[29])
                 logger.debug(".... FN Todays_Maximum_SOC " + str(FN_Todays_Maximum_SOC))
                 
-                response = client.read_holding_registers(reg + 30, count=1)
-                FN_Todays_NET_Input_AH = round(int(response.registers[0]),2)
+                FN_Todays_NET_Input_AH = round(int(fndc[30]),2)
                 logger.debug(".... FN Todays_NET_Input_AH " + str(FN_Todays_NET_Input_AH))
 
-                response = client.read_holding_registers(reg + 31, count=1)
-                FN_Todays_NET_Input_kWh = round(int(response.registers[0]) * 0.01,2)
+                FN_Todays_NET_Input_kWh = round(int(fndc[31]) * 0.01,2)
                 logger.debug(".... FN Todays_NET_Input_kWh " + str(FN_Todays_NET_Input_kWh))
                 
-                response = client.read_holding_registers(reg + 32, count=1)
-                FN_Todays_NET_Output_AH = round(int(response.registers[0]),2)
+                FN_Todays_NET_Output_AH = round(int(fndc[32]),2)
                 logger.debug(".... FN Todays_NET_Output_AH " + str(FN_Todays_NET_Output_AH))
                 
-                response = client.read_holding_registers(reg + 33, count=1)
-                FN_Todays_NET_Output_kWh = round(int(response.registers[0]) * 0.01,2)
+                FN_Todays_NET_Output_kWh = round(int(fndc[33]) * 0.01,2)
                 logger.debug(".... FN Todays_NET_Output_kWh " + str(FN_Todays_NET_Output_kWh))
 
-                response = client.read_holding_registers(reg + 36, count=1)
-                FN_Charge_Factor_Corrected_NET_Battery_AH = round(decode_int16(int(response.registers[0])),2)
+                FN_Charge_Factor_Corrected_NET_Battery_AH = round(decode_int16(int(fndc[36])),2)
                 logger.debug(".... FN Charge_Factor_Corrected_NET_Battery_AH " + str(FN_Charge_Factor_Corrected_NET_Battery_AH))
                 
-                response = client.read_holding_registers(reg + 37, count=1)
-                FN_Charge_Factor_Corrected_NET_Battery_kWh = round(decode_int16(int(response.registers[0])) * 0.01,2)
+                FN_Charge_Factor_Corrected_NET_Battery_kWh = round(decode_int16(int(fndc[37])) * 0.01,2)
                 logger.debug(".... FN_Charge_Factor_Corrected_NET_Battery_kWh " + str(FN_Charge_Factor_Corrected_NET_Battery_kWh))
                 
-                response = client.read_holding_registers(reg + 38, count=1)
-                FN_Todays_Minimum_Battery_Voltage = round(decode_int16(int(response.registers[0])) * 0.1 ,2)
+                FN_Todays_Minimum_Battery_Voltage = round(decode_int16(int(fndc[38])) * 0.1 ,2)
                 logger.debug(".... FN_Todays_Minimum_Battery_Voltage " + str(FN_Todays_Minimum_Battery_Voltage))                
                 
-                response = client.read_holding_registers(reg + 41, count=1)
-                FN_Todays_Maximum_Battery_Voltage = round(decode_int16(int(response.registers[0])) * 0.1 ,2)
-                logger.debug(".... FN_Todays_Maximum_Battery_Voltage " + str(FN_Todays_Maximum_Battery_Voltage))                
+                FN_Todays_Maximum_Battery_Voltage = round(decode_int16(int(fndc[41])) * 0.1 ,2)
+                logger.debug(".... FN_Todays_Maximum_Battery_Voltage " + str(FN_Todays_Maximum_Battery_Voltage))
+
+                fndc_data_by_address[address] = {
+                    "shunt_a_current": fn_shunt_a_current, "shunt_b_current": fn_shunt_b_current,
+                    "shunt_c_current": fn_shunt_c_current, "battery_voltage": fn_battery_voltage,
+                    "state_of_charge": fn_state_of_charge, "charge_params_met": charge_params_met,
+                    "relay_status": relay_status, "relay_mode": relay_mode,
+                    "battery_temperature": fn_battery_temperature,
+                    "accumulated_ah_shunt_a": FN_Shunt_A_Accumulated_AH, "accumulated_kwh_shunt_a": FN_Shunt_A_Accumulated_kWh,
+                    "accumulated_ah_shunt_b": FN_Shunt_B_Accumulated_AH, "accumulated_kwh_shunt_b": FN_Shunt_B_Accumulated_kWh,
+                    "accumulated_ah_shunt_c": FN_Shunt_C_Accumulated_AH, "accumulated_kwh_shunt_c": FN_Shunt_C_Accumulated_kWh,
+                    "days_since_charge_met": FN_Days_Since_Charge_Parameters_Met, "today_min_soc": FN_Todays_Minimum_SOC,
+                    "today_max_soc": FN_Todays_Maximum_SOC, "today_net_input_ah": FN_Todays_NET_Input_AH,
+                    "today_net_output_ah": FN_Todays_NET_Output_AH, "today_net_input_kwh": FN_Todays_NET_Input_kWh,
+                    "today_net_output_kwh": FN_Todays_NET_Output_kWh,
+                    "charge_factor_corrected_net_batt_ah": FN_Charge_Factor_Corrected_NET_Battery_AH,
+                    "charge_factor_corrected_net_batt_kwh": FN_Charge_Factor_Corrected_NET_Battery_kWh,
+                    "min_voltage": FN_Todays_Minimum_Battery_Voltage, "max_voltage": FN_Todays_Maximum_Battery_Voltage
+                }
 
             if "FLEXnet-DC Configuration Block" in blockResult['DID']:
+                response = client.read_holding_registers(
+                    reg,
+                    count=blockResult["size"] + 2
+                )
+                fndc_config = response.registers
                 logger.debug(".. Detect a FLEXnet-DC Configuration Block")
 
-                response = client.read_holding_registers(reg + 2, count=1)
-                logger.debug(".... Connected on HUB port " + str(response.registers[0]))
-                port=(response.registers[0]-1)
+                logger.debug(".... Connected on HUB port " + str(fndc_config[2]))
+                port=(fndc_config[2]-1)
+                address=port+1
+                fndc_data = fndc_data_by_address.get(address)
+                if fndc_data is None:
+                    raise RuntimeError("FLEXnet-DC Configuration Block has no matching real time block on HUB port " + str(address))
+
+                fn_shunt_a_current = fndc_data["shunt_a_current"]
+                fn_shunt_b_current = fndc_data["shunt_b_current"]
+                fn_shunt_c_current = fndc_data["shunt_c_current"]
+                fn_battery_voltage = fndc_data["battery_voltage"]
+                fn_state_of_charge = fndc_data["state_of_charge"]
+                charge_params_met = fndc_data["charge_params_met"]
+                relay_status = fndc_data["relay_status"]
+                relay_mode = fndc_data["relay_mode"]
+                fn_battery_temperature = fndc_data["battery_temperature"]
+                FN_Shunt_A_Accumulated_AH = fndc_data["accumulated_ah_shunt_a"]
+                FN_Shunt_A_Accumulated_kWh = fndc_data["accumulated_kwh_shunt_a"]
+                FN_Shunt_B_Accumulated_AH = fndc_data["accumulated_ah_shunt_b"]
+                FN_Shunt_B_Accumulated_kWh = fndc_data["accumulated_kwh_shunt_b"]
+                FN_Shunt_C_Accumulated_AH = fndc_data["accumulated_ah_shunt_c"]
+                FN_Shunt_C_Accumulated_kWh = fndc_data["accumulated_kwh_shunt_c"]
+                FN_Days_Since_Charge_Parameters_Met = fndc_data["days_since_charge_met"]
+                FN_Todays_Minimum_SOC = fndc_data["today_min_soc"]
+                FN_Todays_Maximum_SOC = fndc_data["today_max_soc"]
+                FN_Todays_NET_Input_AH = fndc_data["today_net_input_ah"]
+                FN_Todays_NET_Output_AH = fndc_data["today_net_output_ah"]
+                FN_Todays_NET_Input_kWh = fndc_data["today_net_input_kwh"]
+                FN_Todays_NET_Output_kWh = fndc_data["today_net_output_kwh"]
+                FN_Charge_Factor_Corrected_NET_Battery_AH = fndc_data["charge_factor_corrected_net_batt_ah"]
+                FN_Charge_Factor_Corrected_NET_Battery_kWh = fndc_data["charge_factor_corrected_net_batt_kwh"]
+                FN_Todays_Minimum_Battery_Voltage = fndc_data["min_voltage"]
+                FN_Todays_Maximum_Battery_Voltage = fndc_data["max_voltage"]
                 
-                response = client.read_holding_registers(reg + 14, count=1)
-                FNconfig_Shunt_A_Enabled = int(response.registers[0])
-                Shunt_A_Enabled_list=("ON","OFF")
-                Shunt_A_Enabled=Shunt_A_Enabled_list[FNconfig_Shunt_A_Enabled]
+                FNconfig_Shunt_A_Enabled = int(fndc_config[14])
+                Shunt_A_Enabled = decode_enum(FNconfig_Shunt_A_Enabled, fndc_shunt_enabled_list, "FNDC shunt A enabled")
                 logger.debug(".... FN Shunt_A_Enabled " + Shunt_A_Enabled)
                 
-                response = client.read_holding_registers(reg + 15, count=1)
-                FNconfig_Shunt_B_Enabled = int(response.registers[0])
-                Shunt_B_Enabled_list=("ON","OFF")
-                Shunt_B_Enabled=Shunt_B_Enabled_list[FNconfig_Shunt_B_Enabled]
+                FNconfig_Shunt_B_Enabled = int(fndc_config[15])
+                Shunt_B_Enabled = decode_enum(FNconfig_Shunt_B_Enabled, fndc_shunt_enabled_list, "FNDC shunt B enabled")
                 logger.debug(".... FN Shunt_B_Enabled " + Shunt_B_Enabled)
                 
-                response = client.read_holding_registers(reg + 16, count=1)
-                FNconfig_Shunt_C_Enabled = int(response.registers[0])
-                Shunt_C_Enabled_list=("ON","OFF")
-                Shunt_C_Enabled=Shunt_C_Enabled_list[FNconfig_Shunt_C_Enabled]
+                FNconfig_Shunt_C_Enabled = int(fndc_config[16])
+                Shunt_C_Enabled = decode_enum(FNconfig_Shunt_C_Enabled, fndc_shunt_enabled_list, "FNDC shunt C enabled")
                 logger.debug(".... FN Shunt_C_Enabled " + Shunt_C_Enabled)
                 
                 # FNDC data - JSON preparation
