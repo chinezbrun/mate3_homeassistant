@@ -88,36 +88,70 @@ ReadMateStatus version history:
                  - refactor: standardized decoder logic across all supported SunSpec devices
                  - compatibility: no changes to JSON, MQTT, Home Assistant or MariaDB interfaces
 
+1.4.0_20260814   - new: hardcoded enum and bitfield lookup lists moved to the SDC (SunSpec Data Configuration) data model based on the OutBack AXS application note
+                 - new: enum and bitfield decoding now uses SDC values/aliases with key-based lookup, preserving existing output compatibility
+                 - fix: FNDC status flags decoded by bitmask; relay mode read independently from FNconfig_Relay_Control
+                 - improvement: code comments, logging levels and formatting alignment
+
 ------------------------------------------------------------------------------------------------------------------------
 ChangeMateStatus version history:
 =====================================
 0.2.0 20191001 - update error reporting
+
 0.3.1 20191015 - introduced weather forcast module
-0.3.2 20191101 - introduced two levels for clouds coverage 
+
+0.3.2 20191101 - introduced two levels for clouds coverage
+ 
 0.4.0 20191103 - introduced three levels for clouds coverage,
                  added automatic change for Schedule ACMode in Mate based on weather prediction
                  added in config file the target values for Schedule ACMode
-0.4.1 20191117 - adjusted start / end time for minigrid/backup linked with clouds coverage 
+
+0.4.1 20191117 - adjusted start / end time for minigrid/backup linked with clouds coverage
+ 
 0.4.2 20191226 - very small design adjustments for info/error display messages
+
 0.4.3 20200203 - update on whether prediction limits
-0.4.4 20200222 - delay time for Mate3 connect, overlap with other Mate3's connection should be fixed now 
+
+0.4.4 20200222 - delay time for Mate3 connect, overlap with other Mate3's connection should be fixed now
+ 
 0.5.0 20200422 - activate smart charge function - ability to change invertor charger state based on SOC 
                  or imported variable from other scripts (future integration with HA)
                  all clouds levels are now in config file
+
 0.5.1 20200502 - add possiblity to change multiple target parameters using script arguments -- see valid_arguments.txt
+
 0.5.2 20200524 - config, add MQTT possibility - not used yet (future integration with HA)
+
 0.6.0 20200608 - refine the purpose of the script
                  completely rewrite the code to keep only routines for read/write to MATE
                  add dinamic_data.json as base for values to be writen to MATE
                  usage of arguments same functionality like in 0.5.2
+
 0.6.1 20200712 - bug fixed - when argument is provided the other json lists are ignored
-0.7.0 20200902 - new functionality - update json, extended the list of arguments - force bulk and EQ 
+
+0.7.0 20200902 - new functionality - update json, extended the list of arguments - force bulk and EQ
+ 
 0.7.1 20201224 - enhancements - list of valid argumentes changed for better integration with HA 
+
+
 0.7.2 20210123 - enhancements - cleaning, response time, speed up - config updated with "general" section
+
+
 0.7.3_20240101 - arguments correction GriedTied replaced with GridTied
+
 0.8.0_20250118 - fix - pymodbus <=3.8.3 compatibility
+
 0.9.0_20250125 - fix - pymodbus <=3.8.3 compatibility, bugfix, anticipate 3.9.0 removal of 'BinaryPayloadDecoder'
                  refactoring: output data directories, scripts alignment RMS-CMS, common config file RMS-CMS
                  new: new events logging
+
 0.9.1_20250316 - various logging bugfix and improvements
+
 0.9.2_20251006 - fix: pymodbus 3.x.x, HA2025.09 compatibility
+
+1.0.0_20260813 - new: SDC SunSpec Data Configuration (sdc.py) a single source of truth data model, built from the OutBack AXS app note 
+               - new: ChangeMate is no longer limited to a fixed hardcoded command list; in principle, all SDC fields marked writable can be accessed
+               - new: dynamic SunSpec block detection and command targeting for compatible detected hardware
+               - new: CLI command/value input with SDC validation, --list and --help; mate_input.json structure updated for the new command model
+               - new: write_active gate, datatype/range validation, write verification/retries and R/W vs W handling
+               - improvement: logging, error reporting and code structure alignment
