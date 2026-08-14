@@ -5,13 +5,28 @@
 # Shell Command provides fix parameters to ReadMateStatusModBus.py -- useful for automation, run-once to force quick updates
 
 # YAML 
-shell_command:  
-  outback_change_grid_input_mode: "python3 /media/web/mate3_homeassistant/ChangeMateStatusModBus.py {{states.input_select.solar_grid_input_mode.state}}"
-  outback_change_charger_mode: "python3 /media/web/mate3_homeassistant/ChangeMateStatusModBus.py {{states.input_select.solar_charger_mode.state}}"
-  outback_start_bulk: "python3 /media/web/mate3_homeassistant/ChangeMateStatusModBus.py StartBulk"
-  outback_stop_bulk: "python3 /media/web/mate3_homeassistant/ChangeMateStatusModBus.py StopBulk"
-  outback_start_eq: "python3 /media/web/mate3_homeassistant/ChangeMateStatusModBus.py StartEQ"
-  outback_stop_eq: "python3 /media/web/mate3_homeassistant/ChangeMateStatusModBus.py StopEQ"
-  
+shell_command:
+
   outback_change_mate_status: "python3 /media/web/mate3_homeassistant/ChangeMateStatusModBus.py"
+
   outback_read_mate_status: "python3 /media/web/mate3_homeassistant/ReadMateStatusModBus.py daemon_active=false SQL_active=false MQTT_discovery_active=false"
+
+  outback_change_grid_input_mode: >
+    python3 /media/web/mate3_homeassistant/ChangeMateStatusModBus.py
+    inverter_grid_input_mode "{{ states('input_select.solar_grid_input_mode') }}"
+
+  outback_change_charger_mode: >
+    python3 /media/web/mate3_homeassistant/ChangeMateStatusModBus.py
+    inverter_charger_operating_mode "{{ states('input_select.solar_charger_mode') }}"
+
+  outback_start_bulk: >
+    python3 /media/web/mate3_homeassistant/ChangeMateStatusModBus.py
+    system_bulk_charge_enable_disable StartBulk
+
+  outback_stop_bulk: >
+    python3 /media/web/mate3_homeassistant/ChangeMateStatusModBus.py
+    system_bulk_charge_enable_disable StopBulk
+
+  outback_start_eq: >
+    python3 /media/web/mate3_homeassistant/ChangeMateStatusModBus.py
+    system_bulk_charge_enable_disable StartEQ  
