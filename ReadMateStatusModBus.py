@@ -10,9 +10,10 @@ import paho.mqtt.publish as publish
 import shutil  
 import sys, os
 import re
+from sdc import SDC_BLOCKS
 
-script_ver = "1.3.0_20260805"
-print ("script version: "+ script_ver)
+script_ver = "1.4.0_20260814"
+print("script version: " + script_ver)
 
 pathname               = os.path.dirname(sys.argv[0])
 working_dir            = os.path.abspath(pathname) 
@@ -28,6 +29,7 @@ CLI_ALLOWED_KEYS = {
 }
 
 # CLI overrides - decoding
+# Apply allowed key=value CLI overrides to the loaded configuration.
 def apply_cli_overrides(cfg):
     # flag: becomes True if at least one valid CLI parameter is found
     cli_override_found = False
@@ -71,7 +73,7 @@ def apply_cli_overrides(cfg):
 
 config                 = ConfigParser()
 config.read(os.path.join(working_dir, 'config.cfg'))
-config                 = apply_cli_overrides(config)  #CLI overrides - temporary config overrides from key=value arguments
+config                 = apply_cli_overrides(config)  # CLI overrides - temporary config overrides from key=value arguments
 
 #MATE3 connection
 mate3_ip               = config.get('MATE3 connection', 'mate3_ip')
@@ -127,31 +129,31 @@ print("daemon active:           ", daemon_active)
 print("scan frequency:          ", scan_frequency, "sec")
 
 ## LOGGER setup
-# Creează un logger
 logger = logging.getLogger("outback")
 logger.setLevel(LOGGING_LEVEL_FILE)  # Setează nivelul minim de logare
 
-# Handler pentru consolă
+# Console handler
 console_handler = logging.StreamHandler()
 console_handler.setLevel(LOGGING_LEVEL_FILE)
-#formater
+# formater
 console_formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s', datefmt='%Y%m%d %H:%M:%S')
 console_handler.setFormatter(console_formatter)
 
-# Handler pentru fișier
+# File handler
 # merge paths to use proper separators windows or Linux
 log_path = os.path.join(working_dir, 'data', 'events_rms.log')
 file_handler = RotatingFileHandler(log_path , mode='a', maxBytes=LOGGING_FILE_MAX_SIZE*1000, backupCount=LOGGING_FILE_MAX_FILES, encoding=None, delay=False)
 file_handler.setLevel(LOGGING_LEVEL_FILE)
 
-#formater
+# formater
 file_formatter = logging.Formatter('%(asctime)s| RMS |%(levelname)8s| %(message)s ',datefmt='%Y%m%d %H:%M:%S') 
 file_handler.setFormatter(file_formatter)
 
-# Adaugă handler-ele la logger
+# add handler to logger
 logger.addHandler(console_handler)
 logger.addHandler(file_handler)
 
+# Return a configured label or its fallback when the value is empty.
 def get_config_label(section, option, fallback):
     value = config.get(section, option, fallback=fallback)
     if value == "":
@@ -168,7 +170,7 @@ def clean_name(txt):
         return "Unknown"
     return txt
 
-device_list=[          # used in main loop - HUB port labels from config.cfg
+device_list = [         # used in main loop - HUB port labels from config.cfg
     get_config_label('Labels', 'port_1', 'Port1'),
     get_config_label('Labels', 'port_2', 'Port2'),
     get_config_label('Labels', 'port_3', 'Port3'),
@@ -179,7 +181,7 @@ device_list=[          # used in main loop - HUB port labels from config.cfg
     get_config_label('Labels', 'port_8', 'Port8')
     ]
 
-shunt_list=[           # used in main loop - FLEXnet-DC shunt labels from config.cfg
+shunt_list = [          # used in main loop - FLEXnet-DC shunt labels from config.cfg
     get_config_label('Labels', 'shunt_a', 'Solar'),
     get_config_label('Labels', 'shunt_b', 'Invertor'),
     get_config_label('Labels', 'shunt_c', 'Diverter')
@@ -194,6 +196,7 @@ SHUNT_SINK_ROLES   = ("inverter", "load", "diverter")     # current normally flo
 SHUNT_OTHER_ROLES  = ("unused", "other")                  # not reported as a total of its own
 SHUNT_ROLES        = SHUNT_SOURCE_ROLES + SHUNT_SINK_ROLES + SHUNT_OTHER_ROLES
 
+# Return a validated FLEXnet-DC shunt role from config.cfg.
 def get_shunt_role(option):
     role = config.get('Labels', option, fallback='').strip().lower()
     if role == "":
@@ -203,7 +206,7 @@ def get_shunt_role(option):
         return None
     return role
 
-shunt_role_list=[      # used in main loop - FLEXnet-DC shunt roles from config.cfg
+shunt_role_list = [     # used in main loop - FLEXnet-DC shunt roles from config.cfg
     get_shunt_role('shunt_a_role'),
     get_shunt_role('shunt_b_role'),
     get_shunt_role('shunt_c_role')
@@ -262,76 +265,6 @@ inverter_blocks = {
     "FX Inverter Real Time Block"
 }
 
-# FX/VFX series lookup tables - AXS_APP_NOTE.PDF tables 13 to 17.
-# The error and warning bits are the same as the Radian ones, but the FX enums are not: the FX
-# charger has an extra 'Auto' mode and the FX AC input type has three values instead of seven.
-fx_error_flags = [
-    (0x0001, 'Low AC output voltage'),
-    (0x0002, 'Stacking error'),
-    (0x0004, 'Over temperature error'),
-    (0x0008, 'Low battery voltage'),
-    (0x0010, 'Phase loss'),
-    (0x0020, 'High battery voltage'),
-    (0x0040, 'AC output shorted'),
-    (0x0080, 'AC backfeed')
-]
-
-fx_warning_flags = [
-    (0x0001, 'AC input frequency too high'),
-    (0x0002, 'AC input frequency too low'),
-    (0x0004, 'AC input voltage too low'),
-    (0x0008, 'AC input voltage too high'),
-    (0x0010, 'AC input current exceeds max'),
-    (0x0020, 'Temperature sensor bad'),
-    (0x0040, 'Communications error'),
-    (0x0080, 'Cooling fan fault')
-]
-
-# FX_Inverter_Operating_Mode. Same enumeration as the Radian real time blocks, so the values
-# published to Home Assistant are identical on FX and Radian hardware.
-fx_operating_modes_list = [
-    "Off",                    # 0
-    "Searching",              # 1
-    "Inverting",              # 2
-    "Charging",               # 3
-    "Silent",                 # 4
-    "Float",                  # 5
-    "Equalize",               # 6
-    "Charger Off",            # 7
-    "Support",                # 8
-    "Sell",                   # 9
-    "Pass-through",           # 10
-    "Slave Inverter On",      # 11
-    "Slave Inverter Off",     # 12
-    "Unknown",                # 13
-    "Offsetting",             # 14
-    "AGS Error",              # 15
-    "Comm Error"]             # 16
-
-fx_ac_use_list    = ["AC Drop", "AC Use"]           # FX_AC_Input_State
-fx_aux_relay_list = ["disabled", "enabled"]         # FX_AUX_Output_State
-
-# FXconfig_AC_Input_Type. Published as grid_input_mode so that it shares the Radian topic and reuses
-# the Radian wording for the modes the two families have in common.
-fx_grid_input_mode_list = ["GridTied", "Generator", "GridZero"]
-
-# FXconfig_Charger_Operating_Mode
-fx_charger_mode_list = ["Off", "Auto", "On"]
-
-# Shared lookup tables. The FX/VFX block already uses generic enum/flag decoders;
-# the same mechanism is reused by the Radian, charge controller and FNDC blocks.
-radian_grid_input_mode_list = ["Generator", "Support", "GridTied", "UPS", "Backup", "MiniGrid", "GridZero"]
-radian_charger_mode_list    = ["Off", "On"]
-cc_charge_mode_list         = ["Silent", "Float", "Bulk", "Absorb", "Equalize"]
-cc_aux_mode_list            = ["Float", "Diversion: Relay", "Diversion:SSR", "Low Batt Disconnect",
-                               "Remote", "Vent Fan", "PV Trigger", "Error Output", "Night Light"]
-cc_aux_state_list           = ["Disabled", "Enabled"]
-cc_fault_flags              = [(0x0010, "Fault Input Active"),
-                               (0x0020, "Shorted Battery Temp Sensor"),
-                               (0x0040, "Over Temp"),
-                               (0x0080, "High VOC")]
-fndc_shunt_enabled_list     = ["ON", "OFF"]
-
 # Decoder Class to replace BinaryPayloadDecoder that will be removed in pymodbus 3.9.0
 class SunSpecDecoder:
     def __init__(self, registers):
@@ -353,20 +286,11 @@ class SunSpecDecoder:
         self.offset += size // 2
         return string_data.strip()
     
-# Read SunSpec Header with logic from pymodbus example
+# INT16 conversion helpers
+# Outback has some bugs in their firmware it seems. The FlexNet DC Shunt current measurements
+# Convert a register value to INT16 while preserving the FLEXnet-DC firmware workaround below.
+# Values above the normal measurement range are treated as negative offsets from 65535.
 def decode_int16(signed_value):
-    """
-    Negative numbers (INT16 = short)
-      Some manufacturers allow negative values for some registers. Instead of an allowed integer range 0-65535,
-      a range -32768 to 32767 is allowed. This is implemented as any received value in the upper range (32768-65535)
-      is interpreted as negative value (in the range -32768 to -1).
-      This is two’s complement and is described at http://en.wikipedia.org/wiki/Two%27s_complement.
-      Help functions to calculate the two’s complement value (and back) are provided in MinimalModbus.
-    """
-
-    # Outback has some bugs in their firmware it seems. The FlexNet DC Shunt current measurements
-    # return an offset from 65535 for negative values. No reading should ever be higher then 2000. So use that
-    # print("int16 RAW: {!s}".format(signed_value))
 
     if signed_value > 32768+2000:
         return signed_value - 65535
@@ -375,91 +299,84 @@ def decode_int16(signed_value):
     else:
         return signed_value
 
+# Convert registers declared as INT16 using strict two's complement.
+# This is used where small negative values such as -1 must be preserved.
 def to_int16(register):
-    """
-    Strict two's complement conversion for registers the AXS application note declares as int16.
-
-    decode_int16() above deliberately works around a FLEXnet-DC firmware quirk and therefore cannot
-    represent small negative numbers - 0xFFFF comes back as 0 instead of -1. Scale factors and the FX
-    temperature registers do use small negative values, so they are converted here instead.
-    """
     return register - 65536 if register > 32767 else register
 
+# Convert a SunSpec scale factor register into a multiplier.
+# Implausible scale factors use the supplied default and are logged.
 def sunspec_scale(register, default):
-    """
-    Convert a SunSpec scale factor register into a multiplier, e.g. a scale factor of -1 gives 0.1.
-
-    The FX blocks carry their own scale factors, so FX values are scaled with what the hardware
-    reports rather than with hardcoded constants. OutBack warn that the blocks may change between
-    firmware releases, so an implausible scale factor falls back to `default` and is logged.
-    """
     scale_factor = to_int16(register)
     if not -10 <= scale_factor <= 10:
         logger.warning(".... SunSpec scale factor out of range (" + str(scale_factor) + "), using default " + str(default))
         scale_factor = default
     return 10 ** scale_factor
 
-def decode_enum(value, names, description):
-    """
-    Look up an enumerated register value, without raising when the MATE3 reports an unexpected one.
-    """
-    if 0 <= value < len(names):
-        return names[value]
+# Returns the SDC values used by Read.
+# Aliases are preferred when defined to preserve output compatibility;
+# otherwise the original SDC values are returned.
+def get_sdc_values(did, field_name):
+    field = SDC_BLOCKS[did]["fields"][field_name]
+
+    if field["aliases"]:
+        return field["aliases"]
+    else:
+        return field["values"]
+
+# Return the text for an enumerated register value using its SDC key.
+# Unexpected values are logged and returned as Unknown.
+def decode_enum(value, values, description):
+    key = str(value)
+    if key in values:
+        return values[key]
     logger.warning(".... Unexpected " + description + " value " + str(value))
     return "Unknown (" + str(value) + ")"
 
+# Decode a SunSpec bitfield register using its SDC values mapping.
+# Several bits can be set at the same time, so every known flag that is set is reported.
 def decode_flags(value, flags, none_text='Nothing'):
-    """
-    Decode a SunSpec bitfield register into readable text.
-
-    Several bits can be set at the same time, so every flag that is set is reported.
-    """
     if value == 0:
         return none_text
-    set_flags = [text for bit, text in flags if value & bit]
+    set_flags = [text for bit, text in flags.items() if value & int(bit, 16)]
     if not set_flags:
         logger.warning(".... Unexpected bitfield value " + str(value))
         return "Unknown (" + str(value) + ")"
     return ', '.join(set_flags)
 
+# Return the configured HUB port label, with a fallback for ports outside the configured range.
 def port_label(port):
-    """
-    HUB port label from config.cfg, tolerating a port number outside the configured range.
-    """
     if 0 <= port < len(device_list):
         return device_list[port]
     logger.warning(".... No label configured for HUB port " + str(port + 1))
     return "Port" + str(port + 1)
 
-#convert decimal to binary string
-def binary(decimal) :
+# Convert decimal to binary string
+def binary(decimal):
     otherBase = ""
-    while decimal != 0 :
+    while decimal != 0:
         otherBase  =  str(decimal % 2) + otherBase
         decimal    //=  2
     return otherBase
 
+# Read and return the SunSpec common information block.
 def get_common_block(basereg):
-    """ Read and return the sunspec common information
-    block.
-    :returns: A dictionary of the common block information
-    """
     length   = 69
     response = client.read_holding_registers(basereg, count=(length + 2))
     decoder = SunSpecDecoder(response.registers)
     
     return {
-        'SunSpec_ID': decoder.decode_32bit_uint(),
-        'SunSpec_DID': decoder.decode_16bit_uint(),
-        'SunSpec_Length': decoder.decode_16bit_uint(),
-        'Manufacturer': decoder.decode_string(size=32),
-        'Model': decoder.decode_string(size=32),
-        'Options': decoder.decode_string(size=16),
-        'Version': decoder.decode_string(size=16),
-        'SerialNumber': decoder.decode_string(size=32),
-        'DeviceAddress': decoder.decode_16bit_uint(),
-        'Next_DID': decoder.decode_16bit_uint(),
-        'Next_DID_Length': decoder.decode_16bit_uint(),
+        'SunSpec_ID'      : decoder.decode_32bit_uint(),
+        'SunSpec_DID'     : decoder.decode_16bit_uint(),
+        'SunSpec_Length'  : decoder.decode_16bit_uint(),
+        'Manufacturer'    : decoder.decode_string(size=32),
+        'Model'           : decoder.decode_string(size=32),
+        'Options'         : decoder.decode_string(size=16),
+        'Version'         : decoder.decode_string(size=16),
+        'SerialNumber'    : decoder.decode_string(size=32),
+        'DeviceAddress'   : decoder.decode_16bit_uint(),
+        'Next_DID'        : decoder.decode_16bit_uint(),
+        'Next_DID_Length' : decoder.decode_16bit_uint(),
     }
 
 # Read SunSpec header
@@ -492,6 +409,7 @@ def getSunSpec(basereg):
     blocksize = int(register.registers[0])
     return blocksize
 
+# Read the SunSpec block header and return its size, name and numeric DID.
 def getBlock(basereg):
     #print(basereg) #DPO debug
     try:
@@ -508,7 +426,7 @@ def getBlock(basereg):
     blockname = mate3_did.get(blockID)
     if blockname is None:
         logger.warning("Unknown SunSpec device type with DID=" + str(blockID) + " at register " + str(basereg) + ". The scan stops here")
-    return {"size": blocksize, "DID": blockname}
+    return {"size": blocksize, "DID": blockname, "id": blockID}
 
 #------------------------------------------------
 #  MATE3 ModBus connection helper
@@ -519,11 +437,12 @@ def getBlock(basereg):
 client   = None
 startReg = None
 
+# Connect to MATE3 and locate the first OutBack SunSpec data block.
 def connect_mate3():
     global client, startReg
 
     try:
-        logger.debug("Building MATE3 MODBUS connection")
+        logger.debug(".. Building MATE3 MODBUS connection")
         client = ModbusClient(mate3_ip, port=mate3_modbus)
         client.connect()
 
@@ -595,6 +514,7 @@ INVERTER_SENSOR_IDS_ALL = sorted(set(INVERTER_SENSOR_IDS + FX_INVERTER_SENSOR_ID
 # are only cleared when MQTT_discovery_cleanup is enabled.
 discovery_cleanup_hint_logged = False
 
+# Remove stale Home Assistant discovery entities when cleanup is enabled.
 def retract_discovery(dev_name, topic_prefix, stale_ids, MQTT_auth):
     if not stale_ids:
         return
@@ -606,10 +526,9 @@ def retract_discovery(dev_name, topic_prefix, stale_ids, MQTT_auth):
         # broker back, which this deliberately does not do - on a new installation none of them ever
         # existed. So report what is not published rather than claiming anything was orphaned.
         global discovery_cleanup_hint_logged
-        logger.info(" HA sensors not published by this configuration for " + dev_name + ": " + ", ".join(stale_ids))
+        logger.debug(".... HA sensors not published for " + dev_name + ": " + ", ".join(stale_ids))
         if not discovery_cleanup_hint_logged:
-            logger.info(" Any of these still shown in Home Assistant are left over from an earlier"
-                        " configuration. Set MQTT_discovery_cleanup=true in config.cfg to remove them")
+            logger.info(" Unused HA sensors may exist. Set MQTT_discovery_cleanup=true to remove them")
             discovery_cleanup_hint_logged = True
         return
 
@@ -620,7 +539,7 @@ def retract_discovery(dev_name, topic_prefix, stale_ids, MQTT_auth):
         state_topic  = topic_prefix + "/" + stale_id
         publish.single(config_topic, "", hostname=MQTT_broker, port=MQTT_port, auth=MQTT_auth, qos=0, retain=True)
         publish.single(state_topic,  "", hostname=MQTT_broker, port=MQTT_port, auth=MQTT_auth, qos=0, retain=True)
-        logger.debug(" HA sensor retracted: " + dev_name + "_" + stale_id)
+        logger.debug(".... HA sensor retracted: " + dev_name + "_" + stale_id)
 
 # MQTT Home Assistant discovery.
 # Creates retained MQTT discovery entities after the first successful Mate3 scan.
@@ -812,6 +731,7 @@ def publish_mqtt_discovery(detected_devices, MQTT_auth):
     # retraction below always knows the full set this script can publish. Passing 'active' rather
     # than wrapping the calls in an if keeps the catalogue complete by construction - a sensor
     # cannot be added without the retraction learning about it.
+    # Add one Summary sensor to the discovery lists when it is active.
     def add_summary_sensor(name, device_class, state_class, unit, active=True):
         catalogue.append(name)
         if not active:
@@ -823,15 +743,15 @@ def publish_mqtt_discovery(detected_devices, MQTT_auth):
         stat_cla.append(state_class)
         unit_of_meas.append(unit)
 
-    add_summary_sensor("pv_total_power",        "power",   "measurement",      "W",   active=summary_charger)
-    add_summary_sensor("pv_daily_kwh",          "energy",  "total_increasing", "kWh", active=summary_charger)
-    add_summary_sensor("pv_total_current",      "current", "measurement",      "A",   active=summary_charger)
-    add_summary_sensor("chargers_total_current", "current", "measurement",     "A",   active=summary_charger)
+    add_summary_sensor("pv_total_power",                "power",   "measurement",      "W",   active=summary_charger)
+    add_summary_sensor("pv_daily_kwh",                  "energy",  "total_increasing", "kWh", active=summary_charger)
+    add_summary_sensor("pv_total_current",              "current", "measurement",      "A",   active=summary_charger)
+    add_summary_sensor("chargers_total_current",        "current", "measurement",      "A",   active=summary_charger)
 
-    add_summary_sensor("battery_current",       "current", "measurement",      "A",   active=summary_fndc)
-    add_summary_sensor("battery_power",         "power",   "measurement",      "W",   active=summary_fndc)
-    add_summary_sensor("battery_in_power",      "power",   "measurement",      "W",   active=summary_fndc)
-    add_summary_sensor("battery_out_power",     "power",   "measurement",      "W",   active=summary_fndc)
+    add_summary_sensor("battery_current",               "current", "measurement",      "A",   active=summary_fndc)
+    add_summary_sensor("battery_power",                 "power",   "measurement",      "W",   active=summary_fndc)
+    add_summary_sensor("battery_in_power",              "power",   "measurement",      "W",   active=summary_fndc)
+    add_summary_sensor("battery_out_power",             "power",   "measurement",      "W",   active=summary_fndc)
 
     # One sensor pair per shunt role. Every role is offered to the catalogue so that a role removed
     # from config.cfg has its sensors cleared on the next run.
@@ -841,34 +761,34 @@ def publish_mqtt_discovery(detected_devices, MQTT_auth):
         add_summary_sensor("shunt_" + role + "_power",   "power",   "measurement", "W", active=role_active)
 
     diverter_active = summary_fndc and 'diverter' in shunt_role_list
-    add_summary_sensor("diverted_current",      "current", "measurement",      "A",   active=diverter_active)
-    add_summary_sensor("diverted_power",        "power",   "measurement",      "W",   active=diverter_active)
+    add_summary_sensor("diverted_current",              "current", "measurement",      "A",   active=diverter_active)
+    add_summary_sensor("diverted_power",                "power",   "measurement",      "W",   active=diverter_active)
 
-    add_summary_sensor("inverter_total_current", "current", "measurement",     "A", active=summary_inverter)
-    add_summary_sensor("buy_total_current",      "current", "measurement",     "A", active=summary_inverter)
-    add_summary_sensor("sell_total_current",     "current", "measurement",     "A", active=summary_inverter)
-    add_summary_sensor("inverter_charge_total_current",   "current", "measurement",     "A", active=summary_inverter)
+    add_summary_sensor("inverter_total_current",        "current", "measurement",      "A",   active=summary_inverter)
+    add_summary_sensor("buy_total_current",             "current", "measurement",      "A",   active=summary_inverter)
+    add_summary_sensor("sell_total_current",            "current", "measurement",      "A",   active=summary_inverter)
+    add_summary_sensor("inverter_charge_total_current", "current", "measurement",      "A",   active=summary_inverter)
 
     # sell_total_power is valid for both single and split inverter systems.
     # For split systems it is the sum of L1 and L2 sell power.
-    add_summary_sensor("sell_total_power",       "power",   "measurement",     "W", active=summary_inverter or summary_split_inverter)
+    add_summary_sensor("sell_total_power",              "power",   "measurement",      "W",   active=summary_inverter or summary_split_inverter)
 
-    add_summary_sensor("inverter_L1_total_current", "current", "measurement",  "A", active=summary_split_inverter)
-    add_summary_sensor("inverter_L2_total_current", "current", "measurement",  "A", active=summary_split_inverter)
-    add_summary_sensor("inverter_L1_total_power",   "power",   "measurement",  "W", active=summary_split_inverter)
-    add_summary_sensor("inverter_L2_total_power",   "power",   "measurement",  "W", active=summary_split_inverter)
-    add_summary_sensor("buy_L1_total_current",      "current", "measurement",  "A", active=summary_split_inverter)
-    add_summary_sensor("buy_L2_total_current",      "current", "measurement",  "A", active=summary_split_inverter)
-    add_summary_sensor("buy_L1_total_power",        "power",   "measurement",  "W", active=summary_split_inverter)
-    add_summary_sensor("buy_L2_total_power",        "power",   "measurement",  "W", active=summary_split_inverter)
-    add_summary_sensor("sell_L1_total_current",     "current", "measurement",  "A", active=summary_split_inverter)
-    add_summary_sensor("sell_L2_total_current",     "current", "measurement",  "A", active=summary_split_inverter)
-    add_summary_sensor("sell_L1_total_power",       "power",   "measurement",  "W", active=summary_split_inverter)
-    add_summary_sensor("sell_L2_total_power",       "power",   "measurement",  "W", active=summary_split_inverter)
-    add_summary_sensor("charge_L1_total_current",   "current", "measurement",  "A", active=summary_split_inverter)
-    add_summary_sensor("charge_L2_total_current",   "current", "measurement",  "A", active=summary_split_inverter)
-    add_summary_sensor("charge_L1_total_power",     "power",   "measurement",  "W", active=summary_split_inverter)
-    add_summary_sensor("charge_L2_total_power",     "power",   "measurement",  "W", active=summary_split_inverter)
+    add_summary_sensor("inverter_L1_total_current",     "current", "measurement",      "A",   active=summary_split_inverter)
+    add_summary_sensor("inverter_L2_total_current",     "current", "measurement",      "A",   active=summary_split_inverter)
+    add_summary_sensor("inverter_L1_total_power",       "power",   "measurement",      "W",   active=summary_split_inverter)
+    add_summary_sensor("inverter_L2_total_power",       "power",   "measurement",      "W",   active=summary_split_inverter)
+    add_summary_sensor("buy_L1_total_current",          "current", "measurement",      "A",   active=summary_split_inverter)
+    add_summary_sensor("buy_L2_total_current",          "current", "measurement",      "A",   active=summary_split_inverter)
+    add_summary_sensor("buy_L1_total_power",            "power",   "measurement",      "W",   active=summary_split_inverter)
+    add_summary_sensor("buy_L2_total_power",            "power",   "measurement",      "W",   active=summary_split_inverter)
+    add_summary_sensor("sell_L1_total_current",         "current", "measurement",      "A",   active=summary_split_inverter)
+    add_summary_sensor("sell_L2_total_current",         "current", "measurement",      "A",   active=summary_split_inverter)
+    add_summary_sensor("sell_L1_total_power",           "power",   "measurement",      "W",   active=summary_split_inverter)
+    add_summary_sensor("sell_L2_total_power",           "power",   "measurement",      "W",   active=summary_split_inverter)
+    add_summary_sensor("charge_L1_total_current",       "current", "measurement",      "A",   active=summary_split_inverter)
+    add_summary_sensor("charge_L2_total_current",       "current", "measurement",      "A",   active=summary_split_inverter)
+    add_summary_sensor("charge_L1_total_power",         "power",   "measurement",      "W",   active=summary_split_inverter)
+    add_summary_sensor("charge_L2_total_power",         "power",   "measurement",      "W",   active=summary_split_inverter)
 
     # Clear the summary sensors this system does not have, including any left behind by an earlier
     # run with different hardware or a different shunt role configuration.
@@ -949,6 +869,7 @@ def publish_mqtt_discovery(detected_devices, MQTT_auth):
 
         publish.single(state_topic, message, hostname=MQTT_broker, port=MQTT_port, auth=MQTT_auth, qos=0, retain=True)
 
+# Read the detected SunSpec blocks and build the current system data.
 def main():
     global mqtt_discovery_done, client, startReg
 
@@ -1002,28 +923,29 @@ def main():
     charge_L1_total_power      = 0      # total split phase L1 charger power (W)
     charge_L2_total_power      = 0      # total split phase L2 charger power (W)
     
-    start_run  = datetime.now() # used only for runtime calculation    
+    start_run = datetime.now()                  # used only for runtime calculation    
     
     curent_date_time = datetime.now()
     date_str         = curent_date_time.strftime("%Y-%m-%dT%H:%M:%S")
     date_sql         = datetime.now().replace(second=0, microsecond=0)   
     
-    time={                                         # used for JSON file - servertime now
-    "relay_local_time": date_str,
-    "mate_local_time": date_str,
-    "server_local_time": date_str}
+    time = {                                      # used for JSON file - server time now
+        "relay_local_time"  : date_str,
+        "mate_local_time"   : date_str,
+        "server_local_time" : date_str
+    }
 
-    inverters=0                                    # used to count number of inverters detected
-    chargers =0                                    # used to count number of chargers detected
-    single_inverters=0                             # used to count single phase inverters for conditional summary JSON
-    split_inverters=0                              # used to count split phase inverters for conditional summary JSON
-    fndc_detected=False                            # used to include FNDC/battery values in summary JSON only when FNDC exists
-    detected_blocks=[]                             # used to report the SunSpec blocks seen during this scan
-    inverter_index_by_address={}                   # links inverter configuration blocks to real time blocks
-    charger_index_by_address={}                    # links charge controller configuration blocks to real time blocks
-    charger_data_by_address={}                     # stores charge controller real time values until its config block
-    fndc_data_by_address={}                        # stores FNDC real time values until its config block
-    port=None                                      # HUB port of the block being decoded, reported by the error handlers
+    inverters                 = 0      # used to count number of inverters detected
+    chargers                  = 0      # used to count number of chargers detected
+    single_inverters          = 0      # used to count single phase inverters for conditional summary JSON
+    split_inverters           = 0      # used to count split phase inverters for conditional summary JSON
+    fndc_detected             = False  # used to include FNDC/battery values in summary JSON only when FNDC exists
+    detected_blocks           = []     # used to report the SunSpec blocks seen during this scan
+    inverter_index_by_address = {}     # links inverter configuration blocks to real time blocks
+    charger_index_by_address  = {}     # links charge controller configuration blocks to real time blocks
+    charger_data_by_address   = {}     # stores charge controller real time values until its config block
+    fndc_data_by_address      = {}     # stores FNDC real time values until its config block
+    port                      = None   # HUB port of the block being decoded, reported by the error handlers
     reg = startReg
     for block in range(0, 30):
         blockResult = getBlock(reg)
@@ -1116,11 +1038,11 @@ def main():
                 charge_L2_total_power     += gs_single_inverter_charge_l2_current * gs_single_ac_input_l2_voltage
 
                 gs_single_inverter_operating_mode = int(radian_split[21])
-                operating_modes = decode_enum(gs_single_inverter_operating_mode, fx_operating_modes_list, "Radian operating mode")
+                operating_modes = decode_enum(gs_single_inverter_operating_mode, get_sdc_values(blockResult["id"], "GS_Split_Inverter_Operating_mode"), "Radian operating mode")
                 logger.debug(".... GS Inverter Operating Mode " + str(gs_single_inverter_operating_mode) +" "+ operating_modes)  
                 
                 gs_single_ac_input_state = round(int(radian_split[38]),2)
-                ac_use = decode_enum(gs_single_ac_input_state, fx_ac_use_list, "Radian AC input state")
+                ac_use = decode_enum(gs_single_ac_input_state, get_sdc_values(blockResult["id"], "GS_Split_AC_Input_State"), "Radian AC input state")
                 logger.debug(".... GS AC USE (Y/N) " + str(gs_single_ac_input_state) + " " + ac_use)
                 
                 gs_single_battery_voltage = round(int(radian_split[24]) * 0.1,1)
@@ -1131,7 +1053,7 @@ def main():
 
                 GS_Single_AUX_Relay_Output_State = int(radian_split[26])
                 logger.debug(".... GS Aux Relay state  " + str(GS_Single_AUX_Relay_Output_State))
-                aux_relay = decode_enum(GS_Single_AUX_Relay_Output_State, fx_aux_relay_list, "Radian aux relay state")
+                aux_relay = decode_enum(GS_Single_AUX_Relay_Output_State, get_sdc_values(blockResult["id"], "GS_Split_AUX_Relay_Output_State"), "Radian aux relay state")
 
                 GS_Single_L_Module_Transformer_Temperature = int(radian_split[28])
                 logger.debug(".... GS L Transformer Temperature  " + str(GS_Single_L_Module_Transformer_Temperature))
@@ -1156,42 +1078,42 @@ def main():
                
                 GS_Split_Error_Flags = int(radian_split[22])
                 logger.debug(".... GS Error Flags " + str(GS_Split_Error_Flags))
-                error_flags = decode_flags(GS_Split_Error_Flags, fx_error_flags)
+                error_flags = decode_flags(GS_Split_Error_Flags, get_sdc_values(blockResult["id"], "GS_Split_Error_Flags"))
                 
                 GS_Single_Warning_Flags = int(radian_split[23])
                 logger.debug(".... GS Warning Flags " + str(GS_Single_Warning_Flags))
-                warning_flags = decode_flags(GS_Single_Warning_Flags, fx_warning_flags)
+                warning_flags = decode_flags(GS_Single_Warning_Flags, get_sdc_values(blockResult["id"], "GS_Split_Warning_Flags"))
 
                 # GS data - JSON preparation
                 devices_array={
-                  "address": address,
-                  "device_id": 5,
-                  "inverter_L1_current": gs_single_inverter_output_current,
-                  "buy_L1_current": gs_single_inverter_buy_current,
-                  "charge_L1_current": gs_single_inverter_charge_current,
-                  "ac_input_L1_voltage": gs_single_ac_input_voltage,
-                  "ac_output_L1_voltage": gs_single_output_ac_voltage,
-                  "sell_L1_current": GS_Single_Inverter_Sell_Current,
-                  "inverter_L2_current": gs_single_inverter_l2_output_current,
-                  "buy_L2_current": gs_single_inverter_buy_l2_current,
-                  "charge_L2_current": gs_single_inverter_charge_l2_current,
-                  "ac_input_L2_voltage": gs_single_ac_input_l2_voltage,
-                  "ac_output_L2_voltage": gs_single_output_ac_l2_voltage,
-                  "sell_L2_current": GS_Single_Inverter_Sell_l2_Current,                  
-                  "operating_modes": operating_modes,
-                  "trafo_L_temp": GS_Single_L_Module_Transformer_Temperature,
-                  "capacitor_L_temp": GS_Single_L_Module_Capacitor_Temperature,
-                  "fet_L_temperature": GS_Single_L_Module_FET_Temperature,
-                  "trafo_R_temp": GS_Single_R_Module_Transformer_Temperature,
-                  "capacitor_R_temp": GS_Single_R_Module_Capacitor_Temperature,
-                  "fet_R_temperature": GS_Single_R_Module_FET_Temperature,
-                  "error_modes": [
+                  "address"              : address,
+                  "device_id"            : 5,
+                  "inverter_L1_current"  : gs_single_inverter_output_current,
+                  "buy_L1_current"       : gs_single_inverter_buy_current,
+                  "charge_L1_current"    : gs_single_inverter_charge_current,
+                  "ac_input_L1_voltage"  : gs_single_ac_input_voltage,
+                  "ac_output_L1_voltage" : gs_single_output_ac_voltage,
+                  "sell_L1_current"      : GS_Single_Inverter_Sell_Current,
+                  "inverter_L2_current"  : gs_single_inverter_l2_output_current,
+                  "buy_L2_current"       : gs_single_inverter_buy_l2_current,
+                  "charge_L2_current"    : gs_single_inverter_charge_l2_current,
+                  "ac_input_L2_voltage"  : gs_single_ac_input_l2_voltage,
+                  "ac_output_L2_voltage" : gs_single_output_ac_l2_voltage,
+                  "sell_L2_current"      : GS_Single_Inverter_Sell_l2_Current,
+                  "operating_modes"      : operating_modes,
+                  "trafo_L_temp"         : GS_Single_L_Module_Transformer_Temperature,
+                  "capacitor_L_temp"     : GS_Single_L_Module_Capacitor_Temperature,
+                  "fet_L_temperature"    : GS_Single_L_Module_FET_Temperature,
+                  "trafo_R_temp"         : GS_Single_R_Module_Transformer_Temperature,
+                  "capacitor_R_temp"     : GS_Single_R_Module_Capacitor_Temperature,
+                  "fet_R_temperature"    : GS_Single_R_Module_FET_Temperature,
+                  "error_modes"          : [
                     error_flags
                   ],
-                  "ac_mode": ac_use,
-                  "battery_voltage":gs_single_battery_voltage,
-                  "aux_relay":aux_relay,
-                  "warning_modes": [
+                  "ac_mode"         : ac_use,
+                  "battery_voltage" : gs_single_battery_voltage,
+                  "aux_relay"       : aux_relay,
+                  "warning_modes"   : [
                     warning_flags
                   ],
                   "label":device_list[port]}
@@ -1199,31 +1121,31 @@ def main():
                 
                 # GS data - MQTT preparation   
                 mqtt_devices.append({
-                             "outback/inverters/" + str(inverters) + "/inverter_L1_current":gs_single_inverter_output_current,
-                             "outback/inverters/" + str(inverters) + "/charge_L1_current"  :gs_single_inverter_charge_current,
-                             "outback/inverters/" + str(inverters) + "/buy_L1_current"     :gs_single_inverter_buy_current,
-                             "outback/inverters/" + str(inverters) + "/sell_L1_current"    :GS_Single_Inverter_Sell_Current,
-                             "outback/inverters/" + str(inverters) + "/inverter_L2_current":gs_single_inverter_l2_output_current,
-                             "outback/inverters/" + str(inverters) + "/charge_L2_current"  :gs_single_inverter_charge_l2_current,
-                             "outback/inverters/" + str(inverters) + "/buy_L2_current"     :gs_single_inverter_buy_l2_current,
-                             "outback/inverters/" + str(inverters) + "/sell_L2_current"    :GS_Single_Inverter_Sell_l2_Current,
-                             "outback/inverters/" + str(inverters) + "/battery_voltage" :gs_single_battery_voltage,
-                             "outback/inverters/" + str(inverters) + "/battery_voltage_compensated" :gs_single_temp_compensated_target_voltage,
-                             "outback/inverters/" + str(inverters) + "/ac_input_L1"        :gs_single_ac_input_voltage,
-                             "outback/inverters/" + str(inverters) + "/ac_output_L1"       :gs_single_output_ac_voltage,
-                             "outback/inverters/" + str(inverters) + "/ac_input_L2"        :gs_single_ac_input_l2_voltage,
-                             "outback/inverters/" + str(inverters) + "/ac_output_L2"       :gs_single_output_ac_l2_voltage,
-                             "outback/inverters/" + str(inverters) + "/ac_use"          :ac_use,
-                             "outback/inverters/" + str(inverters) + "/operating_modes" :operating_modes,
-                             "outback/inverters/" + str(inverters) + "/aux_relay"       :aux_relay,
-                             "outback/inverters/" + str(inverters) + "/error_flags"     :error_flags,
-                             "outback/inverters/" + str(inverters) + "/warning_modes"   :warning_flags,
-                             "outback/inverters/" + str(inverters) + "/trafo_L_temp"      :GS_Single_L_Module_Transformer_Temperature,
-                             "outback/inverters/" + str(inverters) + "/capacitor_L_temp"  :GS_Single_L_Module_Capacitor_Temperature,
-                             "outback/inverters/" + str(inverters) + "/fet_L_temp"        :GS_Single_L_Module_FET_Temperature,
-                             "outback/inverters/" + str(inverters) + "/trafo_R_temp"      :GS_Single_R_Module_Transformer_Temperature,
-                             "outback/inverters/" + str(inverters) + "/capacitor_R_temp"  :GS_Single_R_Module_Capacitor_Temperature,
-                             "outback/inverters/" + str(inverters) + "/fet_R_temp"        :GS_Single_R_Module_FET_Temperature                             
+                             "outback/inverters/" + str(inverters) + "/inverter_L1_current"         : gs_single_inverter_output_current,
+                             "outback/inverters/" + str(inverters) + "/charge_L1_current"           : gs_single_inverter_charge_current,
+                             "outback/inverters/" + str(inverters) + "/buy_L1_current"              : gs_single_inverter_buy_current,
+                             "outback/inverters/" + str(inverters) + "/sell_L1_current"             : GS_Single_Inverter_Sell_Current,
+                             "outback/inverters/" + str(inverters) + "/inverter_L2_current"         : gs_single_inverter_l2_output_current,
+                             "outback/inverters/" + str(inverters) + "/charge_L2_current"           : gs_single_inverter_charge_l2_current,
+                             "outback/inverters/" + str(inverters) + "/buy_L2_current"              : gs_single_inverter_buy_l2_current,
+                             "outback/inverters/" + str(inverters) + "/sell_L2_current"             : GS_Single_Inverter_Sell_l2_Current,
+                             "outback/inverters/" + str(inverters) + "/battery_voltage"             : gs_single_battery_voltage,
+                             "outback/inverters/" + str(inverters) + "/battery_voltage_compensated" : gs_single_temp_compensated_target_voltage,
+                             "outback/inverters/" + str(inverters) + "/ac_input_L1"                 : gs_single_ac_input_voltage,
+                             "outback/inverters/" + str(inverters) + "/ac_output_L1"                : gs_single_output_ac_voltage,
+                             "outback/inverters/" + str(inverters) + "/ac_input_L2"                 : gs_single_ac_input_l2_voltage,
+                             "outback/inverters/" + str(inverters) + "/ac_output_L2"                : gs_single_output_ac_l2_voltage,
+                             "outback/inverters/" + str(inverters) + "/ac_use"                      : ac_use,
+                             "outback/inverters/" + str(inverters) + "/operating_modes"             : operating_modes,
+                             "outback/inverters/" + str(inverters) + "/aux_relay"                   : aux_relay,
+                             "outback/inverters/" + str(inverters) + "/error_flags"                 : error_flags,
+                             "outback/inverters/" + str(inverters) + "/warning_modes"               : warning_flags,
+                             "outback/inverters/" + str(inverters) + "/trafo_L_temp"                : GS_Single_L_Module_Transformer_Temperature,
+                             "outback/inverters/" + str(inverters) + "/capacitor_L_temp"            : GS_Single_L_Module_Capacitor_Temperature,
+                             "outback/inverters/" + str(inverters) + "/fet_L_temp"                  : GS_Single_L_Module_FET_Temperature,
+                             "outback/inverters/" + str(inverters) + "/trafo_R_temp"                : GS_Single_R_Module_Transformer_Temperature,
+                             "outback/inverters/" + str(inverters) + "/capacitor_R_temp"            : GS_Single_R_Module_Capacitor_Temperature,
+                             "outback/inverters/" + str(inverters) + "/fet_R_temp"                  : GS_Single_R_Module_FET_Temperature
                              })
       
         except Exception as e:
@@ -1280,11 +1202,11 @@ def main():
                 inverter_charge_total_current   += gs_single_inverter_charge_current
                
                 gs_single_inverter_operating_mode = int(radian_single[14])
-                operating_modes = decode_enum(gs_single_inverter_operating_mode, fx_operating_modes_list, "Radian operating mode")
+                operating_modes = decode_enum(gs_single_inverter_operating_mode, get_sdc_values(blockResult["id"], "GS_Single_Inverter_Operating_mode"), "Radian operating mode")
                 logger.debug(".... FXR Inverter Operating Mode " + str(gs_single_inverter_operating_mode) +" "+ operating_modes)  
                 
                 gs_single_ac_input_state = round(int(radian_single[31]),2)
-                ac_use = decode_enum(gs_single_ac_input_state, fx_ac_use_list, "Radian AC input state")
+                ac_use = decode_enum(gs_single_ac_input_state, get_sdc_values(blockResult["id"], "GS_Single_AC_Input_State"), "Radian AC input state")
                 logger.debug(".... FXR AC USE (Y/N) " + str(gs_single_ac_input_state) + " " + ac_use)
                 
                 gs_single_battery_voltage = round(int(radian_single[17]) * 0.1,1)
@@ -1295,7 +1217,7 @@ def main():
 
                 GS_Single_AUX_Relay_Output_State = int(radian_single[19])
                 logger.debug(".... FXR Aux Relay state  " + str(GS_Single_AUX_Relay_Output_State))
-                aux_relay = decode_enum(GS_Single_AUX_Relay_Output_State, fx_aux_relay_list, "Radian aux relay state")
+                aux_relay = decode_enum(GS_Single_AUX_Relay_Output_State, get_sdc_values(blockResult["id"], "GS_Single_AUX_Relay_Output_State"), "Radian aux relay state")
 
                 GS_Single_L_Module_Transformer_Temperature = int(radian_single[21])
                 logger.debug(".... FXR L Transformer Temperature  " + str(GS_Single_L_Module_Transformer_Temperature))
@@ -1311,33 +1233,33 @@ def main():
                
                 GS_Split_Error_Flags = int(radian_single[15])
                 logger.debug(".... FXR Error Flags " + str(GS_Split_Error_Flags))
-                error_flags = decode_flags(GS_Split_Error_Flags, fx_error_flags)
+                error_flags = decode_flags(GS_Split_Error_Flags, get_sdc_values(blockResult["id"], "GS_Single_Error_Flags"))
                 
                 GS_Single_Warning_Flags = int(radian_single[16])
                 logger.debug(".... FXR Warning Flags " + str(GS_Single_Warning_Flags))
-                warning_flags = decode_flags(GS_Single_Warning_Flags, fx_warning_flags)
+                warning_flags = decode_flags(GS_Single_Warning_Flags, get_sdc_values(blockResult["id"], "GS_Single_Warning_Flags"))
 
                 # FXR data - JSON preparation
                 devices_array={
-                  "address": address,
-                  "device_id": 5,
-                  "inverter_current": gs_single_inverter_output_current,
-                  "buy_current": gs_single_inverter_buy_current,
-                  "charge_current": gs_single_inverter_charge_current,
-                  "ac_input_voltage": gs_single_ac_input_voltage,
-                  "ac_output_voltage": gs_single_output_ac_voltage,
-                  "sell_current": GS_Single_Inverter_Sell_Current,
-                  "operating_modes": operating_modes,
-                  "trafo_temp": GS_Single_L_Module_Transformer_Temperature,
-                  "capacitor_temp": GS_Single_L_Module_Capacitor_Temperature,
-                  "fet_temperature": GS_Single_L_Module_FET_Temperature,
-                  "error_modes": [
+                  "address"           : address,
+                  "device_id"         : 5,
+                  "inverter_current"  : gs_single_inverter_output_current,
+                  "buy_current"       : gs_single_inverter_buy_current,
+                  "charge_current"    : gs_single_inverter_charge_current,
+                  "ac_input_voltage"  : gs_single_ac_input_voltage,
+                  "ac_output_voltage" : gs_single_output_ac_voltage,
+                  "sell_current"      : GS_Single_Inverter_Sell_Current,
+                  "operating_modes"   : operating_modes,
+                  "trafo_temp"        : GS_Single_L_Module_Transformer_Temperature,
+                  "capacitor_temp"    : GS_Single_L_Module_Capacitor_Temperature,
+                  "fet_temperature"   : GS_Single_L_Module_FET_Temperature,
+                  "error_modes"       : [
                     error_flags
                   ],
-                  "ac_mode": ac_use,
-                  "battery_voltage":gs_single_battery_voltage,
-                  "aux_relay":aux_relay,
-                  "warning_modes": [
+                  "ac_mode"         : ac_use,
+                  "battery_voltage" : gs_single_battery_voltage,
+                  "aux_relay"       : aux_relay,
+                  "warning_modes"   : [
                     warning_flags
                   ],
                   "label":device_list[port]}
@@ -1355,22 +1277,22 @@ def main():
 
                 # FXR data - MQTT preparation   
                 mqtt_devices.append({
-                             "outback/inverters/" + str(inverters) + "/inverter_current":gs_single_inverter_output_current,
-                             "outback/inverters/" + str(inverters) + "/charge_current"  :gs_single_inverter_charge_current,
-                             "outback/inverters/" + str(inverters) + "/buy_current"     :gs_single_inverter_buy_current,
-                             "outback/inverters/" + str(inverters) + "/sell_current"    :GS_Single_Inverter_Sell_Current,
-                             "outback/inverters/" + str(inverters) + "/battery_voltage" :gs_single_battery_voltage,
-                             "outback/inverters/" + str(inverters) + "/battery_voltage_compensated" :gs_single_temp_compensated_target_voltage,
-                             "outback/inverters/" + str(inverters) + "/ac_input"        :gs_single_ac_input_voltage,
-                             "outback/inverters/" + str(inverters) + "/ac_output"       :gs_single_output_ac_voltage,
-                             "outback/inverters/" + str(inverters) + "/ac_use"          :ac_use,
-                             "outback/inverters/" + str(inverters) + "/operating_modes" :operating_modes,
-                             "outback/inverters/" + str(inverters) + "/aux_relay"       :aux_relay,
-                             "outback/inverters/" + str(inverters) + "/error_flags"     :error_flags,
-                             "outback/inverters/" + str(inverters) + "/warning_modes"   :warning_flags,
-                             "outback/inverters/" + str(inverters) + "/trafo_temp"      :GS_Single_L_Module_Transformer_Temperature,
-                             "outback/inverters/" + str(inverters) + "/capacitor_temp"  :GS_Single_L_Module_Capacitor_Temperature,
-                             "outback/inverters/" + str(inverters) + "/fet_temp"        :GS_Single_L_Module_FET_Temperature
+                             "outback/inverters/" + str(inverters) + "/inverter_current"            : gs_single_inverter_output_current,
+                             "outback/inverters/" + str(inverters) + "/charge_current"              : gs_single_inverter_charge_current,
+                             "outback/inverters/" + str(inverters) + "/buy_current"                 : gs_single_inverter_buy_current,
+                             "outback/inverters/" + str(inverters) + "/sell_current"                : GS_Single_Inverter_Sell_Current,
+                             "outback/inverters/" + str(inverters) + "/battery_voltage"             : gs_single_battery_voltage,
+                             "outback/inverters/" + str(inverters) + "/battery_voltage_compensated" : gs_single_temp_compensated_target_voltage,
+                             "outback/inverters/" + str(inverters) + "/ac_input"                    : gs_single_ac_input_voltage,
+                             "outback/inverters/" + str(inverters) + "/ac_output"                   : gs_single_output_ac_voltage,
+                             "outback/inverters/" + str(inverters) + "/ac_use"                      : ac_use,
+                             "outback/inverters/" + str(inverters) + "/operating_modes"             : operating_modes,
+                             "outback/inverters/" + str(inverters) + "/aux_relay"                   : aux_relay,
+                             "outback/inverters/" + str(inverters) + "/error_flags"                 : error_flags,
+                             "outback/inverters/" + str(inverters) + "/warning_modes"               : warning_flags,
+                             "outback/inverters/" + str(inverters) + "/trafo_temp"                  : GS_Single_L_Module_Transformer_Temperature,
+                             "outback/inverters/" + str(inverters) + "/capacitor_temp"              : GS_Single_L_Module_Capacitor_Temperature,
+                             "outback/inverters/" + str(inverters) + "/fet_temp"                    : GS_Single_L_Module_FET_Temperature
                              })
       
         except Exception as e:
@@ -1390,18 +1312,18 @@ def main():
                     logger.warning(".. Radian Inverter Configuration Block on HUB port " + str(config_address) + " has no matching real time block. Skipped")
                 else:
                     GSconfig_Grid_Input_Mode = int(radian_config[26])
-                    grid_input_mode = decode_enum(GSconfig_Grid_Input_Mode, radian_grid_input_mode_list, "Radian grid input mode")
+                    grid_input_mode = decode_enum(GSconfig_Grid_Input_Mode, get_sdc_values(blockResult["id"], "GSconfig_Grid_Input_Mode"), "Radian grid input mode")
                     logger.debug(".... FXR Grid input Mode " + str(GSconfig_Grid_Input_Mode) + " " + grid_input_mode)
 
                     GSconfig_Charger_Operating_Mode = int(radian_config[24])
-                    charger_mode = decode_enum(GSconfig_Charger_Operating_Mode, radian_charger_mode_list, "Radian charger operating mode")
+                    charger_mode = decode_enum(GSconfig_Charger_Operating_Mode, get_sdc_values(blockResult["id"], "GSconfig_Charger_Operating_Mode"), "Radian charger operating mode")
                     logger.debug(".... FXR Charger Mode " + str(GSconfig_Charger_Operating_Mode) + " " + charger_mode)
 
                     various_array={
-                      "address": config_address,
-                      "device_id": 5,
-                      "grid_input_mode": grid_input_mode,
-                      "charger_mode": charger_mode
+                      "address"         : config_address,
+                      "device_id"       : 5,
+                      "grid_input_mode" : grid_input_mode,
+                      "charger_mode"    : charger_mode
                       }
                     various.append(various_array)
 
@@ -1478,13 +1400,13 @@ def main():
                 sell_total_power       += fx_inverter_sell_current * fx_ac_input_voltage
                 inverter_charge_total_current   += fx_inverter_charge_current
 
-                operating_modes = decode_enum(fx[12], fx_operating_modes_list, "FX operating mode")
+                operating_modes = decode_enum(fx[12], get_sdc_values(blockResult["id"], "FX_Inverter_Operating_Mode"), "FX operating mode")
                 logger.debug(".... FX Inverter Operating Mode " + str(fx[12]) + " " + operating_modes)
 
-                error_flags = decode_flags(fx[13], fx_error_flags)
+                error_flags = decode_flags(fx[13], get_sdc_values(blockResult["id"], "FX_Error_Flags"))
                 logger.debug(".... FX Error Flags " + str(fx[13]) + " " + error_flags)
 
-                warning_flags = decode_flags(fx[14], fx_warning_flags)
+                warning_flags = decode_flags(fx[14], get_sdc_values(blockResult["id"], "FX_Warning_Flags"))
                 logger.debug(".... FX Warning Flags " + str(fx[14]) + " " + warning_flags)
 
                 fx_battery_voltage = round(fx[15] * dc_voltage_scale, 1)
@@ -1493,7 +1415,7 @@ def main():
                 fx_temp_compensated_target_voltage = round(fx[16] * dc_voltage_scale, 2)
                 logger.debug(".... FX Battery target voltage - temp compensated (V) " + str(fx_temp_compensated_target_voltage))
 
-                aux_relay = decode_enum(fx[17], fx_aux_relay_list, "FX aux relay state")
+                aux_relay = decode_enum(fx[17], get_sdc_values(blockResult["id"], "FX_AUX_Output_State"), "FX aux relay state")
                 logger.debug(".... FX Aux Relay state " + str(fx[17]) + " " + aux_relay)
 
                 fx_transformer_temperature = to_int16(fx[18])
@@ -1505,7 +1427,7 @@ def main():
                 fx_fet_temperature = to_int16(fx[20])
                 logger.debug(".... FX FET Temperature " + str(fx_fet_temperature))
 
-                ac_use = decode_enum(fx[23], fx_ac_use_list, "FX AC input state")
+                ac_use = decode_enum(fx[23], get_sdc_values(blockResult["id"], "FX_AC_Input_State"), "FX AC input state")
                 logger.debug(".... FX AC USE (Y/N) " + str(fx[23]) + " " + ac_use)
 
                 # Daily energy counters. The Radian blocks have no equivalent, so these are published
@@ -1526,32 +1448,32 @@ def main():
                 # Field names match the single phase Radian block so that Home Assistant automations
                 # and the JSON consumers work unchanged on either inverter family.
                 devices_array={
-                  "address": address,
-                  "device_id": 5,
-                  "inverter_current": fx_inverter_output_current,
-                  "buy_current": fx_inverter_buy_current,
-                  "charge_current": fx_inverter_charge_current,
-                  "ac_input_voltage": fx_ac_input_voltage,
-                  "ac_output_voltage": fx_output_ac_voltage,
-                  "sell_current": fx_inverter_sell_current,
-                  "operating_modes": operating_modes,
-                  "trafo_temp": fx_transformer_temperature,
-                  "capacitor_temp": fx_capacitor_temperature,
-                  "fet_temperature": fx_fet_temperature,
-                  "error_modes": [
+                  "address"           : address,
+                  "device_id"         : 5,
+                  "inverter_current"  : fx_inverter_output_current,
+                  "buy_current"       : fx_inverter_buy_current,
+                  "charge_current"    : fx_inverter_charge_current,
+                  "ac_input_voltage"  : fx_ac_input_voltage,
+                  "ac_output_voltage" : fx_output_ac_voltage,
+                  "sell_current"      : fx_inverter_sell_current,
+                  "operating_modes"   : operating_modes,
+                  "trafo_temp"        : fx_transformer_temperature,
+                  "capacitor_temp"    : fx_capacitor_temperature,
+                  "fet_temperature"   : fx_fet_temperature,
+                  "error_modes"       : [
                     error_flags
                   ],
-                  "ac_mode": ac_use,
-                  "battery_voltage":fx_battery_voltage,
-                  "aux_relay":aux_relay,
-                  "warning_modes": [
+                  "ac_mode"         : ac_use,
+                  "battery_voltage" : fx_battery_voltage,
+                  "aux_relay"       : aux_relay,
+                  "warning_modes"   : [
                     warning_flags
                   ],
-                  "output_kwh": fx_output_kwh,
-                  "buy_kwh": fx_buy_kwh,
-                  "sell_kwh": fx_sell_kwh,
-                  "charger_kwh": fx_charger_kwh,
-                  "label":label}
+                  "output_kwh"  : fx_output_kwh,
+                  "buy_kwh"     : fx_buy_kwh,
+                  "sell_kwh"    : fx_sell_kwh,
+                  "charger_kwh" : fx_charger_kwh,
+                  "label"       : label}
                 devices.append(devices_array)     # append FX data to devices
 
                 # FX data - MariaDB SQL preparation
@@ -1567,26 +1489,26 @@ def main():
 
                 # FX data - MQTT preparation
                 mqtt_devices.append({
-                             "outback/inverters/" + str(inverters) + "/inverter_current":fx_inverter_output_current,
-                             "outback/inverters/" + str(inverters) + "/charge_current"  :fx_inverter_charge_current,
-                             "outback/inverters/" + str(inverters) + "/buy_current"     :fx_inverter_buy_current,
-                             "outback/inverters/" + str(inverters) + "/sell_current"    :fx_inverter_sell_current,
-                             "outback/inverters/" + str(inverters) + "/battery_voltage" :fx_battery_voltage,
-                             "outback/inverters/" + str(inverters) + "/battery_voltage_compensated" :fx_temp_compensated_target_voltage,
-                             "outback/inverters/" + str(inverters) + "/ac_input"        :fx_ac_input_voltage,
-                             "outback/inverters/" + str(inverters) + "/ac_output"       :fx_output_ac_voltage,
-                             "outback/inverters/" + str(inverters) + "/ac_use"          :ac_use,
-                             "outback/inverters/" + str(inverters) + "/operating_modes" :operating_modes,
-                             "outback/inverters/" + str(inverters) + "/aux_relay"       :aux_relay,
-                             "outback/inverters/" + str(inverters) + "/error_flags"     :error_flags,
-                             "outback/inverters/" + str(inverters) + "/warning_modes"   :warning_flags,
-                             "outback/inverters/" + str(inverters) + "/trafo_temp"      :fx_transformer_temperature,
-                             "outback/inverters/" + str(inverters) + "/capacitor_temp"  :fx_capacitor_temperature,
-                             "outback/inverters/" + str(inverters) + "/fet_temp"        :fx_fet_temperature,
-                             "outback/inverters/" + str(inverters) + "/output_kwh"      :fx_output_kwh,
-                             "outback/inverters/" + str(inverters) + "/buy_kwh"         :fx_buy_kwh,
-                             "outback/inverters/" + str(inverters) + "/sell_kwh"        :fx_sell_kwh,
-                             "outback/inverters/" + str(inverters) + "/charger_kwh"     :fx_charger_kwh
+                             "outback/inverters/" + str(inverters) + "/inverter_current"            : fx_inverter_output_current,
+                             "outback/inverters/" + str(inverters) + "/charge_current"              : fx_inverter_charge_current,
+                             "outback/inverters/" + str(inverters) + "/buy_current"                 : fx_inverter_buy_current,
+                             "outback/inverters/" + str(inverters) + "/sell_current"                : fx_inverter_sell_current,
+                             "outback/inverters/" + str(inverters) + "/battery_voltage"             : fx_battery_voltage,
+                             "outback/inverters/" + str(inverters) + "/battery_voltage_compensated" : fx_temp_compensated_target_voltage,
+                             "outback/inverters/" + str(inverters) + "/ac_input"                    : fx_ac_input_voltage,
+                             "outback/inverters/" + str(inverters) + "/ac_output"                   : fx_output_ac_voltage,
+                             "outback/inverters/" + str(inverters) + "/ac_use"                      : ac_use,
+                             "outback/inverters/" + str(inverters) + "/operating_modes"             : operating_modes,
+                             "outback/inverters/" + str(inverters) + "/aux_relay"                   : aux_relay,
+                             "outback/inverters/" + str(inverters) + "/error_flags"                 : error_flags,
+                             "outback/inverters/" + str(inverters) + "/warning_modes"               : warning_flags,
+                             "outback/inverters/" + str(inverters) + "/trafo_temp"                  : fx_transformer_temperature,
+                             "outback/inverters/" + str(inverters) + "/capacitor_temp"              : fx_capacitor_temperature,
+                             "outback/inverters/" + str(inverters) + "/fet_temp"                    : fx_fet_temperature,
+                             "outback/inverters/" + str(inverters) + "/output_kwh"                  : fx_output_kwh,
+                             "outback/inverters/" + str(inverters) + "/buy_kwh"                     : fx_buy_kwh,
+                             "outback/inverters/" + str(inverters) + "/sell_kwh"                    : fx_sell_kwh,
+                             "outback/inverters/" + str(inverters) + "/charger_kwh"                 : fx_charger_kwh
                              })
 
         except Exception as e:
@@ -1607,18 +1529,18 @@ def main():
                 if fx_index is None:
                     logger.warning(".. FX Inverter Configuration Block on HUB port " + str(fxconfig_address) + " has no matching real time block. Skipped")
                 else:
-                    grid_input_mode = decode_enum(fxconfig[20], fx_grid_input_mode_list, "FX AC input type")
+                    grid_input_mode = decode_enum(fxconfig[20], get_sdc_values(blockResult["id"], "FXconfig_AC_Input_Type"), "FX AC input type")
                     logger.debug(".... FX Grid input Mode " + str(fxconfig[20]) + " " + grid_input_mode)
 
-                    charger_mode = decode_enum(fxconfig[25], fx_charger_mode_list, "FX charger operating mode")
+                    charger_mode = decode_enum(fxconfig[25], get_sdc_values(blockResult["id"], "FXconfig_Charger_Operating_Mode"), "FX charger operating mode")
                     logger.debug(".... FX Charger Mode " + str(fxconfig[25]) + " " + charger_mode)
 
                     # FX dataconfig - JSON preparation
                     various_array={
-                      "address": fxconfig_address,
-                      "device_id": 5,
-                      "grid_input_mode": grid_input_mode,
-                      "charger_mode": charger_mode
+                      "address"         : fxconfig_address,
+                      "device_id"       : 5,
+                      "grid_input_mode" : grid_input_mode,
+                      "charger_mode"    : charger_mode
                       }
                     various.append(various_array)     # append FX data to devices
 
@@ -1676,7 +1598,7 @@ def main():
 
                 cc_charger_state = round(int(charger[12]),2)
                 logger.debug(".... CC Charger State " + str(cc_charger_state))  # 0=Silent,1=Float,2=Bulk,3=Absorb,4=EQ
-                cc_mode = decode_enum(cc_charger_state, cc_charge_mode_list, "charge controller state")
+                cc_mode = decode_enum(cc_charger_state, get_sdc_values(blockResult["id"], "CC_Charger_State"), "charge controller state")
      
                 cc_batt_voltage = round(int(charger[8]) * 0.1,2)
                 logger.debug(".... CC Battery Voltage (V) " + str(cc_batt_voltage))
@@ -1692,14 +1614,14 @@ def main():
 
                 charger_index_by_address[address] = chargers
                 charger_data_by_address[address] = {
-                    "charger_current": cc_batt_current,
-                    "pv_current": cc_array_current,
-                    "pv_voltage": cc_array_voltage,
-                    "pv_power": CC_Watts,
-                    "charge_mode": cc_mode,
-                    "battery_voltage": cc_batt_voltage,
-                    "daily_ah": CC_Todays_AH,
-                    "daily_kwh": CC_Todays_KW
+                    "charger_current" : cc_batt_current,
+                    "pv_current"      : cc_array_current,
+                    "pv_voltage"      : cc_array_voltage,
+                    "pv_power"        : CC_Watts,
+                    "charge_mode"     : cc_mode,
+                    "battery_voltage" : cc_batt_voltage,
+                    "daily_ah"        : CC_Todays_AH,
+                    "daily_kwh"       : CC_Todays_KW
                 }
           
             if "Charge Controller Configuration block" in blockResult['DID']:           #some CC parameters are in configuration block
@@ -1729,34 +1651,34 @@ def main():
                 CCconfig_AUX_Mode   = int(charger_config[32])
                 logger.debug(".... CC Aux Mode " + str(CCconfig_AUX_Mode))
               
-                aux_mode = decode_enum(CCconfig_AUX_Mode, cc_aux_mode_list, "charge controller AUX mode")
+                aux_mode = decode_enum(CCconfig_AUX_Mode, get_sdc_values(blockResult["id"], "CCconfig_AUX_Mode"), "charge controller AUX mode")
                 
                 CCconfig_AUX_State  = int(charger_config[34])
                 logger.debug(".... CC Aux State " + str(CCconfig_AUX_State))
-                aux_state = decode_enum(CCconfig_AUX_State, cc_aux_state_list, "charge controller AUX state")
+                aux_state = decode_enum(CCconfig_AUX_State, get_sdc_values(blockResult["id"], "CCconfig_AUX_State"), "charge controller AUX state")
                 
                 CCconfig_Faults = int(charger_config[9])
                 logger.debug(".... CC Error Flags " + str(CCconfig_Faults))
-                error_flags = decode_flags(CCconfig_Faults, cc_fault_flags)
+                error_flags = decode_flags(CCconfig_Faults, get_sdc_values(blockResult["id"], "CCconfig_Faults"))
 
                 # Controlers data - JSON preparation
                 devices_array= {
-                  "address": address,
-                  "device_id":3,
-                  "charger_current": cc_batt_current,
-                  "pv_current": cc_array_current,
-                  "pv_voltage": cc_array_voltage,
-                  "pv_power": CC_Watts,
-                  "aux": aux_mode,
-                  "aux_mode": aux_state,
-                  "error_modes": [
+                  "address"         : address,
+                  "device_id"       : 3,
+                  "charger_current" : cc_batt_current,
+                  "pv_current"      : cc_array_current,
+                  "pv_voltage"      : cc_array_voltage,
+                  "pv_power"        : CC_Watts,
+                  "aux"             : aux_mode,
+                  "aux_mode"        : aux_state,
+                  "error_modes"     : [
                     error_flags
                   ],
-                  "charge_mode": cc_mode,
-                  "battery_voltage": cc_batt_voltage,
-                  "daily_ah": CC_Todays_AH,
-                  "daily_kwh": CC_Todays_KW,
-                  "label": device_list[port]
+                  "charge_mode"     : cc_mode,
+                  "battery_voltage" : cc_batt_voltage,
+                  "daily_ah"        : CC_Todays_AH,
+                  "daily_kwh"       : CC_Todays_KW,
+                  "label"           : device_list[port]
                     }
                 devices.append(devices_array)
 
@@ -1768,17 +1690,17 @@ def main():
                 
                 #controlers data - MQTT data preparation
                 mqtt_devices.append({
-                    "outback/chargers/" + str(charger_index) + "/charger_current" :cc_batt_current,
-                    "outback/chargers/" + str(charger_index) + "/pv_current"     :cc_array_current,
-                    "outback/chargers/" + str(charger_index) + "/pv_voltage"     :cc_array_voltage,
-                    "outback/chargers/" + str(charger_index) + "/pv_power"       :CC_Watts,
-                    "outback/chargers/" + str(charger_index) + "/aux"            :aux_mode,
-                    "outback/chargers/" + str(charger_index) + "/aux_mode"       :aux_state,
-                    "outback/chargers/" + str(charger_index) + "/error_modes"    :error_flags,
-                    "outback/chargers/" + str(charger_index) + "/battery_voltage":cc_batt_voltage,
-                    "outback/chargers/" + str(charger_index) + "/daily_ah"       :CC_Todays_AH,
-                    "outback/chargers/" + str(charger_index) + "/daily_kwh"      :CC_Todays_KW,
-                    "outback/chargers/" + str(charger_index) + "/charge_mode"    :cc_mode
+                    "outback/chargers/" + str(charger_index) + "/charger_current" : cc_batt_current,
+                    "outback/chargers/" + str(charger_index) + "/pv_current"      : cc_array_current,
+                    "outback/chargers/" + str(charger_index) + "/pv_voltage"      : cc_array_voltage,
+                    "outback/chargers/" + str(charger_index) + "/pv_power"        : CC_Watts,
+                    "outback/chargers/" + str(charger_index) + "/aux"             : aux_mode,
+                    "outback/chargers/" + str(charger_index) + "/aux_mode"        : aux_state,
+                    "outback/chargers/" + str(charger_index) + "/error_modes"     : error_flags,
+                    "outback/chargers/" + str(charger_index) + "/battery_voltage" : cc_batt_voltage,
+                    "outback/chargers/" + str(charger_index) + "/daily_ah"        : CC_Todays_AH,
+                    "outback/chargers/" + str(charger_index) + "/daily_kwh"       : CC_Todays_KW,
+                    "outback/chargers/" + str(charger_index) + "/charge_mode"     : cc_mode
                     })                 
         
         except Exception as e:
@@ -1863,17 +1785,13 @@ def main():
                 FN_Status_Flags  = int(fndc[14])
                 logger.debug(".... FN Status Flag " + str(FN_Status_Flags))
                 charge_params_met="false"
-                if FN_Status_Flags==2 or FN_Status_Flags==6 or FN_Status_Flags==7:
-                    charge_params_met="true"              
+                if FN_Status_Flags & 0x0002:
+                    charge_params_met="true"
                 logger.debug(".... FN Charge Parameters Met " + str(FN_Status_Flags ) + " " + charge_params_met)
                 relay_status="disabled"
-                if FN_Status_Flags==1 or FN_Status_Flags==3 or FN_Status_Flags==5 or FN_Status_Flags==7:
-                    relay_status="enabled"              
+                if FN_Status_Flags & 0x0001:
+                    relay_status="enabled"
                 logger.debug(".... FN Relay Status " + str(FN_Status_Flags ) + " " + relay_status)
-                relay_mode="auto"
-                if FN_Status_Flags==4 or FN_Status_Flags==5 or FN_Status_Flags==7:
-                    relay_mode="manual"              
-                logger.debug(".... FN Relay Mode " + str(FN_Status_Flags ) + " " + relay_mode)
 
                 fn_battery_temperature = decode_int16(int(fndc[13]))
                 logger.debug(".... FN Battery Temperature " + str(fn_battery_temperature))
@@ -1930,21 +1848,21 @@ def main():
                 logger.debug(".... FN_Todays_Maximum_Battery_Voltage " + str(FN_Todays_Maximum_Battery_Voltage))
 
                 fndc_data_by_address[address] = {
-                    "shunt_a_current": fn_shunt_a_current, "shunt_b_current": fn_shunt_b_current,
-                    "shunt_c_current": fn_shunt_c_current, "battery_voltage": fn_battery_voltage,
-                    "state_of_charge": fn_state_of_charge, "charge_params_met": charge_params_met,
-                    "relay_status": relay_status, "relay_mode": relay_mode,
-                    "battery_temperature": fn_battery_temperature,
-                    "accumulated_ah_shunt_a": FN_Shunt_A_Accumulated_AH, "accumulated_kwh_shunt_a": FN_Shunt_A_Accumulated_kWh,
-                    "accumulated_ah_shunt_b": FN_Shunt_B_Accumulated_AH, "accumulated_kwh_shunt_b": FN_Shunt_B_Accumulated_kWh,
-                    "accumulated_ah_shunt_c": FN_Shunt_C_Accumulated_AH, "accumulated_kwh_shunt_c": FN_Shunt_C_Accumulated_kWh,
-                    "days_since_charge_met": FN_Days_Since_Charge_Parameters_Met, "today_min_soc": FN_Todays_Minimum_SOC,
-                    "today_max_soc": FN_Todays_Maximum_SOC, "today_net_input_ah": FN_Todays_NET_Input_AH,
-                    "today_net_output_ah": FN_Todays_NET_Output_AH, "today_net_input_kwh": FN_Todays_NET_Input_kWh,
-                    "today_net_output_kwh": FN_Todays_NET_Output_kWh,
-                    "charge_factor_corrected_net_batt_ah": FN_Charge_Factor_Corrected_NET_Battery_AH,
-                    "charge_factor_corrected_net_batt_kwh": FN_Charge_Factor_Corrected_NET_Battery_kWh,
-                    "min_voltage": FN_Todays_Minimum_Battery_Voltage, "max_voltage": FN_Todays_Maximum_Battery_Voltage
+                    "shunt_a_current"                      : fn_shunt_a_current, "shunt_b_current": fn_shunt_b_current,
+                    "shunt_c_current"                      : fn_shunt_c_current, "battery_voltage": fn_battery_voltage,
+                    "state_of_charge"                      : fn_state_of_charge, "charge_params_met": charge_params_met,
+                    "relay_status"                         : relay_status,
+                    "battery_temperature"                  : fn_battery_temperature,
+                    "accumulated_ah_shunt_a"               : FN_Shunt_A_Accumulated_AH, "accumulated_kwh_shunt_a": FN_Shunt_A_Accumulated_kWh,
+                    "accumulated_ah_shunt_b"               : FN_Shunt_B_Accumulated_AH, "accumulated_kwh_shunt_b": FN_Shunt_B_Accumulated_kWh,
+                    "accumulated_ah_shunt_c"               : FN_Shunt_C_Accumulated_AH, "accumulated_kwh_shunt_c": FN_Shunt_C_Accumulated_kWh,
+                    "days_since_charge_met"                : FN_Days_Since_Charge_Parameters_Met, "today_min_soc": FN_Todays_Minimum_SOC,
+                    "today_max_soc"                        : FN_Todays_Maximum_SOC, "today_net_input_ah": FN_Todays_NET_Input_AH,
+                    "today_net_output_ah"                  : FN_Todays_NET_Output_AH, "today_net_input_kwh": FN_Todays_NET_Input_kWh,
+                    "today_net_output_kwh"                 : FN_Todays_NET_Output_kWh,
+                    "charge_factor_corrected_net_batt_ah"  : FN_Charge_Factor_Corrected_NET_Battery_AH,
+                    "charge_factor_corrected_net_batt_kwh" : FN_Charge_Factor_Corrected_NET_Battery_kWh,
+                    "min_voltage"                          : FN_Todays_Minimum_Battery_Voltage, "max_voltage": FN_Todays_Maximum_Battery_Voltage
                 }
 
             if "FLEXnet-DC Configuration Block" in blockResult['DID']:
@@ -1969,7 +1887,6 @@ def main():
                 fn_state_of_charge = fndc_data["state_of_charge"]
                 charge_params_met = fndc_data["charge_params_met"]
                 relay_status = fndc_data["relay_status"]
-                relay_mode = fndc_data["relay_mode"]
                 fn_battery_temperature = fndc_data["battery_temperature"]
                 FN_Shunt_A_Accumulated_AH = fndc_data["accumulated_ah_shunt_a"]
                 FN_Shunt_A_Accumulated_kWh = fndc_data["accumulated_kwh_shunt_a"]
@@ -1990,51 +1907,61 @@ def main():
                 FN_Todays_Maximum_Battery_Voltage = fndc_data["max_voltage"]
                 
                 FNconfig_Shunt_A_Enabled = int(fndc_config[14])
-                Shunt_A_Enabled = decode_enum(FNconfig_Shunt_A_Enabled, fndc_shunt_enabled_list, "FNDC shunt A enabled")
+                Shunt_A_Enabled = decode_enum(FNconfig_Shunt_A_Enabled, get_sdc_values(blockResult["id"], "FNconfig_Shunt_A_Enabled"), "FNDC shunt A enabled")
                 logger.debug(".... FN Shunt_A_Enabled " + Shunt_A_Enabled)
                 
                 FNconfig_Shunt_B_Enabled = int(fndc_config[15])
-                Shunt_B_Enabled = decode_enum(FNconfig_Shunt_B_Enabled, fndc_shunt_enabled_list, "FNDC shunt B enabled")
+                Shunt_B_Enabled = decode_enum(FNconfig_Shunt_B_Enabled, get_sdc_values(blockResult["id"], "FNconfig_Shunt_B_Enabled"), "FNDC shunt B enabled")
                 logger.debug(".... FN Shunt_B_Enabled " + Shunt_B_Enabled)
                 
                 FNconfig_Shunt_C_Enabled = int(fndc_config[16])
-                Shunt_C_Enabled = decode_enum(FNconfig_Shunt_C_Enabled, fndc_shunt_enabled_list, "FNDC shunt C enabled")
+                Shunt_C_Enabled = decode_enum(FNconfig_Shunt_C_Enabled, get_sdc_values(blockResult["id"], "FNconfig_Shunt_C_Enabled"), "FNDC shunt C enabled")
                 logger.debug(".... FN Shunt_C_Enabled " + Shunt_C_Enabled)
+
+                FNconfig_Relay_Control = int(fndc_config[17])
+                relay_mode="unknown"
+                if FNconfig_Relay_Control==0:
+                    relay_mode="off"
+                if FNconfig_Relay_Control==1:
+                    relay_mode="auto"
+                if FNconfig_Relay_Control==2:
+                    relay_mode="on"
+                logger.debug(".... FN Relay Mode " + str(FNconfig_Relay_Control) + " " + relay_mode)
                 
                 # FNDC data - JSON preparation
                 devices_array= {
-                  "address": address,
-                  "device_id": 4,
-                  "shunt_a_current": fn_shunt_a_current,
-                  "shunt_b_current": fn_shunt_b_current,
-                  "shunt_c_current": fn_shunt_c_current,
-                  "battery_voltage": fn_battery_voltage,
-                  "state_of_charge": fn_state_of_charge,
-                  "shunt_enabled_a": Shunt_A_Enabled,
-                  "shunt_enabled_b": Shunt_B_Enabled,
-                  "shunt_enabled_c": Shunt_C_Enabled,
-                  "charge_params_met": charge_params_met,
-                  "relay_status": relay_status,
-                  "relay_mode": relay_mode,
-                  "battery_temperature": fn_battery_temperature,
-                  "accumulated_ah_shunt_a": FN_Shunt_A_Accumulated_AH,
-                  "accumulated_kwh_shunt_a": FN_Shunt_A_Accumulated_kWh,
-                  "accumulated_ah_shunt_b": FN_Shunt_B_Accumulated_AH,
-                  "accumulated_kwh_shunt_b": FN_Shunt_B_Accumulated_kWh,
-                  "accumulated_ah_shunt_c": FN_Shunt_C_Accumulated_AH,
-                  "accumulated_kwh_shunt_c": FN_Shunt_C_Accumulated_kWh,
-                  "days_since_charge_met": FN_Days_Since_Charge_Parameters_Met,
-                  "today_min_soc": FN_Todays_Minimum_SOC,
-                  "today_net_input_ah": FN_Todays_NET_Input_AH,
-                  "today_net_output_ah": FN_Todays_NET_Output_AH,
-                  "today_net_input_kwh": FN_Todays_NET_Input_kWh,
-                  "today_net_output_kwh": FN_Todays_NET_Output_kWh,
-                  "charge_factor_corrected_net_batt_ah": FN_Charge_Factor_Corrected_NET_Battery_AH,
-                  "charge_factor_corrected_net_batt_kwh": FN_Charge_Factor_Corrected_NET_Battery_kWh,
-                  "label": device_list[port],
-                  "shunt_a_label": shunt_list[0],
-                  "shunt_b_label": shunt_list[1],
-                  "shunt_c_label": shunt_list[2]
+                  "address"                              : address,
+                  "device_id"                            : 4,
+                  "shunt_a_current"                      : fn_shunt_a_current,
+                  "shunt_b_current"                      : fn_shunt_b_current,
+                  "shunt_c_current"                      : fn_shunt_c_current,
+                  "battery_voltage"                      : fn_battery_voltage,
+                  "state_of_charge"                      : fn_state_of_charge,
+                  "shunt_enabled_a"                      : Shunt_A_Enabled,
+                  "shunt_enabled_b"                      : Shunt_B_Enabled,
+                  "shunt_enabled_c"                      : Shunt_C_Enabled,
+                  "charge_params_met"                    : charge_params_met,
+                  "relay_status"                         : relay_status,
+                  "relay_mode"                           : relay_mode,
+                  "battery_temperature"                  : fn_battery_temperature,
+                  "accumulated_ah_shunt_a"               : FN_Shunt_A_Accumulated_AH,
+                  "accumulated_kwh_shunt_a"              : FN_Shunt_A_Accumulated_kWh,
+                  "accumulated_ah_shunt_b"               : FN_Shunt_B_Accumulated_AH,
+                  "accumulated_kwh_shunt_b"              : FN_Shunt_B_Accumulated_kWh,
+                  "accumulated_ah_shunt_c"               : FN_Shunt_C_Accumulated_AH,
+                  "accumulated_kwh_shunt_c"              : FN_Shunt_C_Accumulated_kWh,
+                  "days_since_charge_met"                : FN_Days_Since_Charge_Parameters_Met,
+                  "today_min_soc"                        : FN_Todays_Minimum_SOC,
+                  "today_net_input_ah"                   : FN_Todays_NET_Input_AH,
+                  "today_net_output_ah"                  : FN_Todays_NET_Output_AH,
+                  "today_net_input_kwh"                  : FN_Todays_NET_Input_kWh,
+                  "today_net_output_kwh"                 : FN_Todays_NET_Output_kWh,
+                  "charge_factor_corrected_net_batt_ah"  : FN_Charge_Factor_Corrected_NET_Battery_AH,
+                  "charge_factor_corrected_net_batt_kwh" : FN_Charge_Factor_Corrected_NET_Battery_kWh,
+                  "label"                                : device_list[port],
+                  "shunt_a_label"                        : shunt_list[0],
+                  "shunt_b_label"                        : shunt_list[1],
+                  "shunt_c_label"                        : shunt_list[2]
                 }
 
                 # Roles appear in the JSON only when they were actually set in config.cfg. An
@@ -2113,22 +2040,22 @@ def main():
                     
                 # FNDC data - MQTT data preparation topic:value
                 mqtt_devices.append ({
-                     "outback/fndc/battery_voltage"      :fn_battery_voltage,
-                     "outback/fndc/state_of_charge"      :fn_state_of_charge,
-                     "outback/fndc/battery_temperature"  :fn_battery_temperature,
-                     "outback/fndc/shunt_a_current"      :fn_shunt_a_current,
-                     "outback/fndc/shunt_c_current"      :fn_shunt_c_current,
-                     "outback/fndc/shunt_b_current"      :fn_shunt_b_current,
-                     "outback/fndc/charge_params_met"    :charge_params_met,
-                     "outback/fndc/today_min_soc"        :FN_Todays_Minimum_SOC,
-                     "outback/fndc/today_max_soc"        :FN_Todays_Maximum_SOC,
-                     "outback/fndc/days_since_charge_met":FN_Days_Since_Charge_Parameters_Met,
-                     "outback/fndc/today_net_input_ah"   :FN_Todays_NET_Input_AH,
-                     "outback/fndc/today_net_output_ah"  :FN_Todays_NET_Output_AH,
-                     "outback/fndc/todays_net_input_kWh" :FN_Todays_NET_Input_kWh,
-                     "outback/fndc/todays_net_output_kWh":FN_Todays_NET_Output_kWh,
-                     "outback/fndc/min_voltage"          :FN_Todays_Minimum_Battery_Voltage,
-                     "outback/fndc/max_voltage"          :FN_Todays_Maximum_Battery_Voltage
+                     "outback/fndc/battery_voltage"       : fn_battery_voltage,
+                     "outback/fndc/state_of_charge"       : fn_state_of_charge,
+                     "outback/fndc/battery_temperature"   : fn_battery_temperature,
+                     "outback/fndc/shunt_a_current"       : fn_shunt_a_current,
+                     "outback/fndc/shunt_c_current"       : fn_shunt_c_current,
+                     "outback/fndc/shunt_b_current"       : fn_shunt_b_current,
+                     "outback/fndc/charge_params_met"     : charge_params_met,
+                     "outback/fndc/today_min_soc"         : FN_Todays_Minimum_SOC,
+                     "outback/fndc/today_max_soc"         : FN_Todays_Maximum_SOC,
+                     "outback/fndc/days_since_charge_met" : FN_Days_Since_Charge_Parameters_Met,
+                     "outback/fndc/today_net_input_ah"    : FN_Todays_NET_Input_AH,
+                     "outback/fndc/today_net_output_ah"   : FN_Todays_NET_Output_AH,
+                     "outback/fndc/todays_net_input_kWh"  : FN_Todays_NET_Input_kWh,
+                     "outback/fndc/todays_net_output_kWh" : FN_Todays_NET_Output_kWh,
+                     "outback/fndc/min_voltage"           : FN_Todays_Minimum_Battery_Voltage,
+                     "outback/fndc/max_voltage"           : FN_Todays_Maximum_Battery_Voltage
                      })
 
         except Exception as e:
@@ -2139,12 +2066,12 @@ def main():
         else:
             # Report what the scan found. A block that is present but not decoded used to be skipped
             # without a trace, which made unsupported hardware very hard to spot.
-            logger.debug(" SunSpec blocks detected: " + ", ".join(detected_blocks))
+            logger.debug(".. SunSpec blocks detected: " + ", ".join(detected_blocks))
 
             not_decoded = sorted({name for name in detected_blocks
                                   if name not in handled_blocks and name != "End of SunSpec"})
             if not_decoded:
-                logger.debug(" SunSpec blocks present but not decoded by this script: " + ", ".join(not_decoded))
+                logger.debug(".. SunSpec blocks present but not decoded by this script: " + ", ".join(not_decoded))
 
             if inverters == 0 and not any(name in inverter_blocks for name in detected_blocks):
                 logger.warning(" No inverter real time block found. Blocks detected: " + ", ".join(detected_blocks))
@@ -2153,7 +2080,7 @@ def main():
             client = None
             mate_run = datetime.now()                                             
             running_time = round ((mate_run - start_run).total_seconds(),3)       
-            logger.debug(" Mate connection closed")
+            logger.debug(".. Mate connection closed")
 
             # MQTT discovery - publish Home Assistant device definitions once,
             # immediately after the first complete Mate3 scan.
@@ -2162,11 +2089,11 @@ def main():
                 if len(MQTT_username) > 0:
                     MQTT_auth = { 'username': MQTT_username, 'password': MQTT_password }
 
-                logger.debug(" HA device: Outback Summary")
-                logger.debug(" HA device: Outback System")
+                logger.debug(".... HA device: Outback Summary")
+                logger.debug(".... HA device: Outback System")
                 publish_mqtt_discovery(detected_devices, MQTT_auth)
                 mqtt_discovery_done = True
-                logger.debug(" HA devices discovery completed")
+                logger.debug(".. HA devices discovery completed")
 
             print("---------------------------------------------------------------------------")
             print(f"running time Mate:      {running_time:8.3f} sec")  
@@ -2192,7 +2119,7 @@ def main():
             
             if not fndc_detected:
                 mydb.commit()
-                logger.debug(" Summary of the day skipped - FNDC not detected")
+                logger.debug(".. Summary of the day skipped - FNDC not detected")
             else:
                 # summary of the day calculation for MariaDB upload
                 sql="SELECT date,kwh_in,kwh_out,ah_in,max_soc,min_soc FROM monitormate_summary \
@@ -2209,7 +2136,7 @@ def main():
                     mycursor = mydb.cursor()
                     mycursor.execute(sql, val)
                     mydb.commit()
-                    logger.debug(" Summary of the day - first record completed")
+                    logger.debug(".. Summary of the day - first record completed")
                 else:                                                                           # if records - update table
                     val=(FN_Todays_NET_Input_kWh,FN_Todays_NET_Output_kWh,FN_Todays_NET_Input_AH,FN_Todays_NET_Output_AH,
                          FN_Todays_Maximum_SOC,FN_Todays_Minimum_SOC,date_now)
@@ -2376,6 +2303,7 @@ def main():
 # Main execution mode
 # daemon_active = true  -> run continuously and wait scan_frequency seconds between scans
 # daemon_active = false -> run once and exit; useful for cron / task scheduler
+# Close the MATE3 Modbus connection without interrupting shutdown.
 def close_mate3_safely():
     global client
     try:
