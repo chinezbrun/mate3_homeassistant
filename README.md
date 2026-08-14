@@ -3,6 +3,7 @@
 ![Home Assistant](/docs/HomeAssistant/example_ha_sunsynk-power-flow-card.png)  
 ![card](/docs/HomeAssistant/example_ha_outback_stat_card.png)  
 ![card](/docs/HomeAssistant/example_ha_outback_config_card.png)
+
 ---
 # Supported Hardware
 Devices are detected automatically from the SunSpec blocks the MATE3 reports - no configuration is needed to select a hardware family.
@@ -20,18 +21,22 @@ FX/VFX and Radian inverters publish the same JSON fields and MQTT topics, so Hom
 ---
 # How Does This Software Work?
 This integration is based on:
-- `ReadMateStatusModBus.py` (RMS) for reading MATE3  
-- `ChangeMateStatusModBus.py` (CMS) for writing data  
+- `ReadMateStatusModBus.py` (RMS) for reading MATE3/MATE3S
+- `ChangeMateStatusModBus.py` (CMS) for writing data
+- `sdc.py` (SDC - SunSpec Data Configuration), a shared Single Source of Truth based on the OutBack AXS application note, used by both RMS and CMS for SunSpec block, register, datatype, access, scale factor, enum, and bitfield definitions
 
 - An MQTT broker must be installed (MQTT documentation is outside the scope of this project).
-- RMS creates a JSON file with almost all useful parameters extracted from Mate3 and pushes MQTT data for selected parameters. More functionalities of RMS can be configured in the config file (`config.cfg`).
+- RMS creates a JSON file with almost all useful parameters extracted from MATE3/MATE3S and pushes MQTT data for selected parameters. More functionalities of RMS can be configured in the config file (`config.cfg`).
 - MQTT Auto Discovery for Home Assistant devices/sensors is implemented as of v3.0.0. Manual configuration of MQTT sensors in YAML or using the JSON file remains valid options.
-- Running CMS will write a specific parameter to MATE3. More details can be found [here](/docs/ChangeMate_Status/ChangeMateStatusInstructions.txt).
+- CMS uses the shared SDC definitions to validate and write supported parameters to MATE3/MATE3S.
+
 ---
 # ReadMateStatusModBus.py
-- Queries MATE3/MATE3S, retrieves data, formats it, registers it in the MariaDB database (optional - more info [here](/docs/MariaDB/Readme.txt)), pushes MQTT data, and returns a JSON file.
+- Queries MATE3/MATE3S, retrieves and formats data, optionally stores it in MariaDB (more info [here](/docs/MariaDB/Readme.txt)), publishes MQTT data, and generates a JSON file.
+- Enum and bitfield definitions are read from the shared SDC data model instead of being maintained as hardcoded lookup lists in ReadMate.
 - The `ReadMateStatusModBus.py` script can run in **daemon mode** with a configurable scan interval, or in **run-once mode** where a task should be created (Windows or Linux).
 - `config.cfg` is the configuration file for the script and should be set up based on your needs.
+
 ### CLI usage
 Force a single execution in run-once mode with temporary `config.cfg` overrides:
 ```
@@ -43,6 +48,7 @@ python ReadMateStatusModbus.py MQTT_active=false MQTT_discovery_active=false
 ```
 * Allows only enabling/disabling features (MQTT, JSON, SQL); see the whitelist of valid CLI parameters
 * Any valid CLI parameter automatically forces run-once mode; therefore, `daemon_active=true` from CLI is ignored
+
 Default behavior (no CLI args) follows `config.cfg`.
 
 ### FLEXnet-DC shunt roles
@@ -75,17 +81,25 @@ Changing a role takes effect on the next restart. The sensors for the old role a
 
 ### ReadMateStatusModBus.sh (Optional)
 - This is an example Linux script that can be used to start `ReadMateStatusModBus.py`. The script should run at the desired update frequency (e.g., every minute). Refer to your OS or distribution’s documentation for setting up daemons or scheduled tasks.
+
 ---
 # ChangeMateStatusModBus.py
-- `ChangeMateStatusModBus.py` can write ModBus data to MATE3. A limited set of parameters can be modified.  
-- The script accepts arguments to indicate the parameters to be changed. It can also change multiple parameters during a single run.  
-- More details can be found [here](/docs/ChangeMate_Status/ChangeMateStatusInstructions.txt).  
+`ChangeMateStatusModBus.py` writes supported ModBus parameters to MATE3/MATE3S.
+
+Starting with v1.0.0, ChangeMate uses the shared SDC data model instead of a fixed hardcoded command list. Parameters defined in the SDC with the appropriate write access can be handled through the common command interface.
+
+- Commands can be provided through CLI arguments or `mate_input.json`.
+- Multiple parameters can be changed during a single run.
+- Commands and values are validated against the SDC before writing.
+- ModBus writes remain protected by the `write_active` configuration option.
+- More details can be found [here](/docs/ChangeMate_Status/ChangeMate_1.0_Upgrade_Notes.md).
 - Automation in Home Assistant can be achieved using [shell commands](https://www.home-assistant.io/integrations/shell_command/). Examples are in the documentation folder [here](/docs/HomeAssistant/example_shell_command_usage_yaml.txt).
+
+> **Note:** The `mate_input.json` structure changed in ChangeMate v1.0.0 to support the new SDC-based command model. 
+Existing files from previous ChangeMate versions should be updated. See the ChangeMate documentation for CLI usage, available parameters, validation, examples, and migration instructions.
+
 ---
 # Home Assistant Configuration
-- A new folder named `data` should be created in the `www` directory in Home Assistant (e.g., `/config/www/data`).  
-This path must match the JSON output path defined in `config.cfg`. RMS will save the JSON file to this location.
-
 ## Integration Variants
 ### 1. Automatic: MQTT Auto Discovery (RECOMMENDED)
 
@@ -109,17 +123,17 @@ This happens after a shunt role change, after swapping between inverter families
 MQTT_discovery_cleanup = false
 ```
 
-Left at the default, the script **reports** those sensors in the log on each discovery and leaves them alone:
+Left at the default, the script leaves those sensors untouched. If unused Home Assistant sensors may exist, the normal log reports:
 
 ```
-HA sensors not published by this configuration for outback_summary: diverted_current, diverted_power
-Any of these still shown in Home Assistant are left over from an earlier configuration.
-Set MQTT_discovery_cleanup=true in config.cfg to remove them
+Unused HA sensors may exist. Set MQTT_discovery_cleanup=true to remove them
 ```
 
-The script cannot tell which of those actually exist in Home Assistant without reading the broker back, which it deliberately does not do, so on a new installation this list is simply the sensors your hardware does not have.
+The detailed list of sensors not published by the current configuration is available when DEBUG logging is enabled.
 
-Set it to `true` and the script clears them instead, by publishing an empty retained message to both the discovery config topic and the state topic - which is the only mechanism MQTT auto discovery provides for removing an entity. This deletes entities from Home Assistant, so it is off unless you ask for it.
+The script cannot tell which of those actually exist in Home Assistant without reading the broker back, which it deliberately does not do. On a new installation, the DEBUG list therefore simply represents sensors that do not apply to the detected hardware and current configuration.
+
+Set `MQTT_discovery_cleanup` to `true` and the script clears them instead, by publishing an empty retained message to both the discovery config topic and the state topic - which is the mechanism MQTT Auto Discovery provides for removing an entity. This deletes entities from Home Assistant, so it is off unless you ask for it.
 
 Only sensors are cleared, and only within devices that are still present. A device that is missing from a scan is never removed, so a charge controller that is briefly offline does not disappear from Home Assistant.
 
@@ -129,7 +143,10 @@ MQTT_discovery_active = false
 ```
 - Use MQTT Explorer to view the full list of available topics.
 - Examples can be found [here](/docs/HomeAssistant/examples_ha_mqtt_sensors_manual_configuration.txt)
+
 ### 3. Manual: JSON File Decoding (FILE integration)
+- A new folder named `data` should be created in the `www` directory in Home Assistant (e.g., `/config/www/data`).  
+This path must match the JSON output path defined in `config.cfg`. RMS will save the JSON file to this location.
 ```ini
 MQTT_discovery_active = false
 ```
@@ -137,4 +154,3 @@ MQTT_discovery_active = false
   ```
   /config/www/data/mate_status.json
   ```
-
