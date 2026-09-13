@@ -114,6 +114,20 @@ MQTT_discovery_active = true
   - Summary  
   - System  
 
+#### Availability when the MATE3 stops answering
+
+Sensor values are published with the **retain** flag and carry no timestamp, so if the MATE3 becomes unreachable the broker keeps serving the last readings and Home Assistant shows them as current - indefinitely, and with nothing to indicate the data is hours or months old. Losing SunSpec on the MATE3, a network change, or a device that has simply stopped responding all look identical to a working system whose values happen not to have moved.
+
+The script therefore publishes its own availability, retained, on:
+
+```
+outback/status        online | offline
+```
+
+`offline` is published when a scan cannot reach the MATE3, `online` once a scan's data has actually reached the broker, and only when the state changes rather than on every scan. Discovery configs carry `avty_t`, so entities created by MQTT Auto Discovery pick this up with no manual configuration and show as unavailable rather than stale.
+
+A last will is not used, and would not help: messages are sent with `publish.single()`, which disconnects cleanly after each one so the broker discards any will, and in the usual case the script is running perfectly well - it is the MATE3 that has gone away. If the script itself stops, the last retained value on `outback/status` stays as it was, so supervise the process separately if that matters to you.
+
 #### Removing entities that are no longer published
 Discovery configs and sensor values are published to MQTT with the **retain** flag, and the topics are one per sensor. When your configuration changes, the script publishes the topics that now apply - it does not publish to the topics that no longer apply, and nothing overwrites them. The broker keeps serving those old retained messages, including across a broker restart, so Home Assistant recreates the entity every time it subscribes and shows its last value indefinitely. Deleting the device in Home Assistant does not help, because the retained config brings it straight back.
 
