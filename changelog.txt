@@ -93,6 +93,13 @@ ReadMateStatus version history:
                  - fix: FNDC status flags decoded by bitmask; relay mode read independently from FNconfig_Relay_Control
                  - improvement: code comments, logging levels and formatting alignment
 
+1.5.0_20260913   - new: MQTT availability published retained on outback/status, so Home Assistant marks the sensors
+                   unavailable when the MATE3 stops answering instead of showing the last values indefinitely
+                 - new: avty_t added to every discovery config, so existing entities pick the topic up with no
+                   manual configuration
+                 - note: a last will cannot cover this - publish.single() disconnects cleanly after each message,
+                   and the script is normally healthy when the MATE3 is the thing that has gone away
+
 ------------------------------------------------------------------------------------------------------------------------
 ChangeMateStatus version history:
 =====================================

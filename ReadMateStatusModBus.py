@@ -104,6 +104,11 @@ MQTT_port              = int(config.get('MQTT', 'MQTT_port'))
 MQTT_username          = config.get('MQTT', 'MQTT_username')
 MQTT_password          = config.get('MQTT', 'MQTT_password')
 
+# Home Assistant availability.
+MQTT_availability_topic = "outback/status"
+MQTT_payload_online     = "online"
+MQTT_payload_offline    = "offline"
+
 daemon_active          = config.get('General','daemon_active', fallback='false')
 
 try:
@@ -514,6 +519,43 @@ INVERTER_SENSOR_IDS_ALL = sorted(set(INVERTER_SENSOR_IDS + FX_INVERTER_SENSOR_ID
 # are only cleared when MQTT_discovery_cleanup is enabled.
 discovery_cleanup_hint_logged = False
 
+
+# Availability as last published, so the state is only sent when it changes.
+mqtt_availability_state = None
+
+# Tell Home Assistant whether the values it holds are still being refreshed.
+#
+# Every value is published retained and carries no timestamp, so when the MATE3
+# stops answering the last readings stay on the broker and Home Assistant goes
+# on showing them as current - indefinitely, and with no indication that the
+# data is hours or months old.
+#
+# A last will cannot cover this. Messages are sent with publish.single(), which
+# connects and disconnects per message, so the broker discards any will. More to
+# the point, the script is usually perfectly healthy when this happens: it is
+# the MATE3 that has gone away, which is a condition only the script itself can
+# report.
+def publish_availability(state):
+    global mqtt_availability_state
+
+    if MQTT_active != 'true' or state == mqtt_availability_state:
+        return
+
+    MQTT_auth = None
+    if len(MQTT_username) > 0:
+        MQTT_auth = { 'username': MQTT_username, 'password': MQTT_password }
+
+    try:
+        publish.single(MQTT_availability_topic, state, hostname=MQTT_broker, port=MQTT_port,
+                       auth=MQTT_auth, qos=0, retain=True)
+        mqtt_availability_state = state
+        logger.info(" MQTT availability: " + state)
+    except Exception:
+        # Never fatal. Failing to say we are offline must not stop the next scan
+        # from being attempted, and the state is retried on the next change.
+        logger.exception("MQTT availability")
+
+
 # Remove stale Home Assistant discovery entities when cleanup is enabled.
 def retract_discovery(dev_name, topic_prefix, stale_ids, MQTT_auth):
     if not stale_ids:
@@ -692,6 +734,8 @@ def publish_mqtt_discovery(detected_devices, MQTT_auth):
             if unit_of_meas[n] is not None:
                 msg["unit_of_meas"] = unit_of_meas[n]
 
+            msg["avty_t"] = MQTT_availability_topic
+
             msg["dev"] = {
                 "identifiers"  : [dev_name],
                 "manufacturer" : manufacturer,
@@ -812,6 +856,8 @@ def publish_mqtt_discovery(detected_devices, MQTT_auth):
         if unit_of_meas[n] is not None:
             msg["unit_of_meas"] = unit_of_meas[n]
 
+        msg["avty_t"] = MQTT_availability_topic
+
         msg["dev"] = {
             "identifiers"  : [dev_name],
             "manufacturer" : manufacturer,
@@ -857,6 +903,8 @@ def publish_mqtt_discovery(detected_devices, MQTT_auth):
         if unit_of_meas[n] is not None:
             msg["unit_of_meas"] = unit_of_meas[n]
 
+        msg["avty_t"] = MQTT_availability_topic
+
         msg["dev"] = {
             "identifiers"  : [dev_name],
             "manufacturer" : manufacturer,
@@ -874,6 +922,7 @@ def main():
     global mqtt_discovery_done, client, startReg
 
     if connect_mate3() == False:
+        publish_availability(MQTT_payload_offline)
         return False
 
     # MQTT discovery device list. Filled during the normal SunSpec scan; no
@@ -2287,6 +2336,10 @@ def main():
             messages.append((topic, payload, 0, True))
             
             publish.multiple(messages, hostname=MQTT_broker, port=MQTT_port, auth=MQTT_auth)
+
+            # Only after the data is on the broker, so availability follows the
+            # readings rather than merely the script still being alive.
+            publish_availability(MQTT_payload_online)
         
         mqtt_run = datetime.now()                                                   
         running_time = round ((mqtt_run - json_run).total_seconds(),3)              
@@ -2319,6 +2372,7 @@ if daemon_active == 'true':
             main()
         except Exception:
             logger.exception("Main loop error")
+            publish_availability(MQTT_payload_offline)
             close_mate3_safely()
 
         tm.sleep(scan_frequency)
@@ -2329,4 +2383,5 @@ else:
             logger.critical("Single run failed")
     except Exception:
         logger.exception("Main loop error")
+        publish_availability(MQTT_payload_offline)
         close_mate3_safely()
