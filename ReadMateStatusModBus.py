@@ -12,7 +12,7 @@ import sys, os
 import re
 from sdc import SDC_BLOCKS
 
-script_ver = "1.4.0_20260814"
+script_ver = "1.5.0_20260913"
 print("script version: " + script_ver)
 
 pathname               = os.path.dirname(sys.argv[0])
