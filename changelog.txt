@@ -100,7 +100,11 @@ ReadMateStatus version history:
                  - note: a last will cannot cover this - publish.single() disconnects cleanly after each message,
                    and the script is normally healthy when the MATE3 is the thing that has gone away
 
-------------------------------------------------------------------------------------------------------------------------
+1.5.1_20261007   - new: separate MATE3 status and Home Assistant availability topics
+                 - new: configurable availability failure threshold in daemon mode
+                 - new: immediate status and availability update in single-run mode
+                 - improvement: comments and logging cleanup
+-----------------------------------
 ChangeMateStatus version history:
 =====================================
 0.2.0 20191001 - update error reporting
