@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import json
 import time as tm
 import logging
@@ -7,16 +8,16 @@ from datetime import datetime
 from pymodbus.client import ModbusTcpClient as ModbusClient
 from configparser import ConfigParser
 import paho.mqtt.publish as publish
-import shutil  
+import shutil
 import sys, os
 import re
-from sdc import SDC_BLOCKS
+from sdc import SDC_BLOCKS  # SDC (SunSpec Data Configuration)
 
-script_ver = "1.5.0_20260913"
+script_ver = "1.5.1_20261007"
 print("script version: " + script_ver)
 
 pathname               = os.path.dirname(sys.argv[0])
-working_dir            = os.path.abspath(pathname) 
+working_dir            = os.path.abspath(pathname)
 
 
 # CLI overrides - temporary config overrides from key=value arguments
@@ -27,6 +28,7 @@ CLI_ALLOWED_KEYS = {
     "MQTT_discovery_active",
     "SQL_active"
 }
+
 
 # CLI overrides - decoding
 # Apply allowed key=value CLI overrides to the loaded configuration.
@@ -56,17 +58,17 @@ def apply_cli_overrides(cfg):
                     cli_override_found = True
 
         except Exception:
-            
+
             # silent fallback - do not interrupt execution
             print("CLI override:            ", cli_override_found, "- key/value not valid")
             pass
 
     # if at least one valid CLI parameter was provided:
     if cli_override_found:
-        
+
         cfg.set('General', 'daemon_active', 'false')
         cfg.set('Path', 'duplicate_active', 'false')
-        
+
     print("CLI override:            ", cli_override_found)
     print("working directory:       ", working_dir)
     return cfg
@@ -75,13 +77,13 @@ config                 = ConfigParser()
 config.read(os.path.join(working_dir, 'config.cfg'))
 config                 = apply_cli_overrides(config)  # CLI overrides - temporary config overrides from key=value arguments
 
-#MATE3 connection
+# MATE3 connection
 mate3_ip               = config.get('MATE3 connection', 'mate3_ip')
 mate3_modbus           = config.get('MATE3 connection', 'mate3_modbus')
 sunspec_start_reg      = 40000
 
-# SQL Maria DB connection
-SQL_active             = config.get('Maria DB connection', 'SQL_active')                             
+# MariaDB connection
+SQL_active             = config.get('Maria DB connection', 'SQL_active')
 host                   = config.get('Maria DB connection', 'host')
 db_port                = config.get('Maria DB connection', 'db_port')
 user                   = config.get('Maria DB connection', 'user')
@@ -91,37 +93,39 @@ output_path            = config.get('Path', 'output_path')
 duplicate_active       = config.get('Path', 'duplicate_active')
 duplicate_path         = config.get('Path', 'duplicate_path')
 
-# merge paths to use proper separators windows or Linux
+# Resolve output path.
 if output_path == "":
     output_path = os.path.join(working_dir, 'data')
 
-# MQTT 
-MQTT_active            = config.get('MQTT', 'MQTT_active')
-MQTT_discovery_active  = config.get('MQTT', 'MQTT_discovery_active', fallback='true')
-MQTT_discovery_cleanup = config.get('MQTT', 'MQTT_discovery_cleanup', fallback='false')
-MQTT_broker            = config.get('MQTT', 'MQTT_broker')
-MQTT_port              = int(config.get('MQTT', 'MQTT_port'))
-MQTT_username          = config.get('MQTT', 'MQTT_username')
-MQTT_password          = config.get('MQTT', 'MQTT_password')
+# MQTT configuration
+MQTT_active                 = config.get('MQTT', 'MQTT_active')
+MQTT_discovery_active       = config.get('MQTT', 'MQTT_discovery_active', fallback='true')
+MQTT_discovery_cleanup      = config.get('MQTT', 'MQTT_discovery_cleanup', fallback='false')
+MQTT_broker                 = config.get('MQTT', 'MQTT_broker')
+MQTT_port                   = int(config.get('MQTT', 'MQTT_port'))
+MQTT_username               = config.get('MQTT', 'MQTT_username')
+MQTT_password               = config.get('MQTT', 'MQTT_password')
+MQTT_availability_threshold = int(config.get('MQTT', 'MQTT_availability_threshold', fallback='0'))
 
-# Home Assistant availability.
-MQTT_availability_topic = "outback/status"
+# MATE3 status and Home Assistant availability.
+MQTT_status_topic       = "outback/status"
+MQTT_availability_topic = "outback/availability"
 MQTT_payload_online     = "online"
 MQTT_payload_offline    = "offline"
 
-daemon_active          = config.get('General','daemon_active', fallback='false')
+daemon_active          = config.get('General', 'daemon_active', fallback='false')
 
 try:
-    scan_frequency = int(config.get('General','scan_frequency', fallback='60'))
+    scan_frequency = int(config.get('General', 'scan_frequency', fallback='60'))
     if scan_frequency < 10:
         raise ValueError
 except:
     print("Too low scan_frequency, fallback to 10 sec")
     scan_frequency = 10
 
-LOGGING_LEVEL_FILE     = config.get('General','LOGGING_LEVEL_FILE')
-LOGGING_FILE_MAX_SIZE  = int(config.get('General','LOGGING_FILE_MAX_SIZE'))
-LOGGING_FILE_MAX_FILES = int(config.get('General','LOGGING_FILE_MAX_FILES'))
+LOGGING_LEVEL_FILE     = config.get('General', 'LOGGING_LEVEL_FILE')
+LOGGING_FILE_MAX_SIZE  = int(config.get('General', 'LOGGING_FILE_MAX_SIZE'))
+LOGGING_FILE_MAX_FILES = int(config.get('General', 'LOGGING_FILE_MAX_FILES'))
 
 print("working directory:       ", working_dir)
 print("output location:         ", output_path)
@@ -130,33 +134,35 @@ print("SQL active  :            ", SQL_active)
 print("MQTT active :            ", MQTT_active)
 print("MQTT discovery active:   ", MQTT_discovery_active)
 print("MQTT_discovery_cleanup:  ", MQTT_discovery_cleanup)
+print("MQTT availability threshold:", MQTT_availability_threshold)
 print("daemon active:           ", daemon_active)
 print("scan frequency:          ", scan_frequency, "sec")
 
-## LOGGER setup
+# Logger setup
 logger = logging.getLogger("outback")
 logger.setLevel(LOGGING_LEVEL_FILE)  # Setează nivelul minim de logare
 
 # Console handler
 console_handler = logging.StreamHandler()
 console_handler.setLevel(LOGGING_LEVEL_FILE)
-# formater
+# Formatter
 console_formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s', datefmt='%Y%m%d %H:%M:%S')
 console_handler.setFormatter(console_formatter)
 
 # File handler
-# merge paths to use proper separators windows or Linux
+# Build log file path.
 log_path = os.path.join(working_dir, 'data', 'events_rms.log')
-file_handler = RotatingFileHandler(log_path , mode='a', maxBytes=LOGGING_FILE_MAX_SIZE*1000, backupCount=LOGGING_FILE_MAX_FILES, encoding=None, delay=False)
+file_handler = RotatingFileHandler(log_path, mode='a', maxBytes=LOGGING_FILE_MAX_SIZE*1000, backupCount=LOGGING_FILE_MAX_FILES, encoding=None, delay=False)
 file_handler.setLevel(LOGGING_LEVEL_FILE)
 
-# formater
-file_formatter = logging.Formatter('%(asctime)s| RMS |%(levelname)8s| %(message)s ',datefmt='%Y%m%d %H:%M:%S') 
+# Formatter
+file_formatter = logging.Formatter('%(asctime)s| RMS |%(levelname)8s| %(message)s ', datefmt='%Y%m%d %H:%M:%S')
 file_handler.setFormatter(file_formatter)
 
-# add handler to logger
+# Add handlers to logger.
 logger.addHandler(console_handler)
 logger.addHandler(file_handler)
+
 
 # Return a configured label or its fallback when the value is empty.
 def get_config_label(section, option, fallback):
@@ -164,6 +170,7 @@ def get_config_label(section, option, fallback):
     if value == "":
         return fallback
     return value
+
 
 # MQTT discovery helper - sanitize labels from config.cfg before using them
 # in Home Assistant identifiers, display names, and model fields.
@@ -192,14 +199,13 @@ shunt_list = [          # used in main loop - FLEXnet-DC shunt labels from confi
     get_config_label('Labels', 'shunt_c', 'Diverter')
     ]
 
-# FLEXnet-DC shunt roles from config.cfg.
-# The labels above are free text for display only. The FNDC does not report what a shunt is wired to,
-# so the calculated summary needs to be told: a shunt measuring a diversion load and one measuring an
-# inverter look identical over ModBus.
+# FLEXnet-DC shunt roles used by calculated summary values.
+# Labels are display-only; roles define what each shunt measures.
 SHUNT_SOURCE_ROLES = ("solar", "charger")                 # current normally flows into the battery
 SHUNT_SINK_ROLES   = ("inverter", "load", "diverter")     # current normally flows out of the battery
 SHUNT_OTHER_ROLES  = ("unused", "other")                  # not reported as a total of its own
 SHUNT_ROLES        = SHUNT_SOURCE_ROLES + SHUNT_SINK_ROLES + SHUNT_OTHER_ROLES
+
 
 # Return a validated FLEXnet-DC shunt role from config.cfg.
 def get_shunt_role(option):
@@ -217,22 +223,18 @@ shunt_role_list = [     # used in main loop - FLEXnet-DC shunt roles from config
     get_shunt_role('shunt_c_role')
     ]
 
-# Before roles were configurable the summary assumed shunt C was a diversion load, which is wrong on
-# any system that uses shunt C for something else. Installations that have not set any role keep the
-# old behaviour so their existing Home Assistant sensors keep working.
+# Keep legacy shunt C diverter behavior when no roles are configured.
 if not any(role is not None for role in shunt_role_list):
     shunt_role_list = [None, None, 'diverter']
     shunt_roles_configured = False
 else:
     shunt_roles_configured = True
 
-# Define the dictionary mapping SUNSPEC DID's to Outback names
-# Device IDs definitions = (DID)
-# AXS_APP_NOTE.PDF from Outback website has the data
+# Map SunSpec DIDs to OutBack block names (AXS_APP_NOTE.PDF).
 mate3_did = {
     64110: "Outback block",
     64111: "Charge Controller Block",
-    64112: "Charge Controller Configuration block",    
+    64112: "Charge Controller Configuration block",
     64115: "Split Phase Radian Inverter Real Time Block",
     64116: "Radian Inverter Configuration Block",
     64117: "Single Phase Radian Inverter Real Time Block",
@@ -248,9 +250,7 @@ mate3_did = {
     65535: "End of SunSpec"
 }
 
-# SunSpec blocks that are actually decoded below. Blocks that the MATE3 reports but that are not in
-# this set are listed in the log at the end of every scan, so an unsupported device shows up as a
-# clear message instead of being skipped in silence.
+# SunSpec blocks decoded by this script.
 handled_blocks = {
     "Split Phase Radian Inverter Real Time Block",
     "Single Phase Radian Inverter Real Time Block",
@@ -263,38 +263,36 @@ handled_blocks = {
     "FLEXnet-DC Configuration Block"
 }
 
-# Real time block names that carry an inverter, used to warn when a scan finds no inverter at all.
+# Inverter real-time blocks used to detect missing inverter data.
 inverter_blocks = {
     "Split Phase Radian Inverter Real Time Block",
     "Single Phase Radian Inverter Real Time Block",
     "FX Inverter Real Time Block"
 }
 
-# Decoder Class to replace BinaryPayloadDecoder that will be removed in pymodbus 3.9.0
+# Minimal SunSpec register decoder.
 class SunSpecDecoder:
     def __init__(self, registers):
         self.registers = registers
         self.offset = 0
-        
+
     def decode_16bit_uint(self):
         value = self.registers[self.offset]
         self.offset += 1
         return value
-    
+
     def decode_32bit_uint(self):
         value = (self.registers[self.offset] << 16) + self.registers[self.offset + 1]
         self.offset += 2
         return value
-    
+
     def decode_string(self, size):
         string_data = ''.join([chr((self.registers[i] >> 8) & 0xFF) + chr(self.registers[i] & 0xFF) for i in range(self.offset, self.offset + (size // 2))])
         self.offset += size // 2
         return string_data.strip()
-    
-# INT16 conversion helpers
-# Outback has some bugs in their firmware it seems. The FlexNet DC Shunt current measurements
-# Convert a register value to INT16 while preserving the FLEXnet-DC firmware workaround below.
-# Values above the normal measurement range are treated as negative offsets from 65535.
+
+
+# INT16 conversion with FLEXnet-DC firmware workaround.
 def decode_int16(signed_value):
 
     if signed_value > 32768+2000:
@@ -304,13 +302,13 @@ def decode_int16(signed_value):
     else:
         return signed_value
 
-# Convert registers declared as INT16 using strict two's complement.
-# This is used where small negative values such as -1 must be preserved.
+
+# Convert INT16 registers using two's complement.
 def to_int16(register):
     return register - 65536 if register > 32767 else register
 
-# Convert a SunSpec scale factor register into a multiplier.
-# Implausible scale factors use the supplied default and are logged.
+
+# Convert a SunSpec scale factor to a multiplier.
 def sunspec_scale(register, default):
     scale_factor = to_int16(register)
     if not -10 <= scale_factor <= 10:
@@ -318,9 +316,8 @@ def sunspec_scale(register, default):
         scale_factor = default
     return 10 ** scale_factor
 
-# Returns the SDC values used by Read.
-# Aliases are preferred when defined to preserve output compatibility;
-# otherwise the original SDC values are returned.
+
+# Return SDC (SunSpec Data Configuration) aliases when available.
 def get_sdc_values(did, field_name):
     field = SDC_BLOCKS[did]["fields"][field_name]
 
@@ -329,8 +326,8 @@ def get_sdc_values(did, field_name):
     else:
         return field["values"]
 
-# Return the text for an enumerated register value using its SDC key.
-# Unexpected values are logged and returned as Unknown.
+
+# Decode an enum using SDC (SunSpec Data Configuration).
 def decode_enum(value, values, description):
     key = str(value)
     if key in values:
@@ -338,8 +335,8 @@ def decode_enum(value, values, description):
     logger.warning(".... Unexpected " + description + " value " + str(value))
     return "Unknown (" + str(value) + ")"
 
-# Decode a SunSpec bitfield register using its SDC values mapping.
-# Several bits can be set at the same time, so every known flag that is set is reported.
+
+# Decode a bitfield using SDC (SunSpec Data Configuration).
 def decode_flags(value, flags, none_text='Nothing'):
     if value == 0:
         return none_text
@@ -349,12 +346,14 @@ def decode_flags(value, flags, none_text='Nothing'):
         return "Unknown (" + str(value) + ")"
     return ', '.join(set_flags)
 
+
 # Return the configured HUB port label, with a fallback for ports outside the configured range.
 def port_label(port):
     if 0 <= port < len(device_list):
         return device_list[port]
     logger.warning(".... No label configured for HUB port " + str(port + 1))
     return "Port" + str(port + 1)
+
 
 # Convert decimal to binary string
 def binary(decimal):
@@ -364,12 +363,13 @@ def binary(decimal):
         decimal    //=  2
     return otherBase
 
+
 # Read and return the SunSpec common information block.
 def get_common_block(basereg):
     length   = 69
     response = client.read_holding_registers(basereg, count=(length + 2))
     decoder = SunSpecDecoder(response.registers)
-    
+
     return {
         'SunSpec_ID'      : decoder.decode_32bit_uint(),
         'SunSpec_DID'     : decoder.decode_16bit_uint(),
@@ -384,10 +384,10 @@ def get_common_block(basereg):
         'Next_DID_Length' : decoder.decode_16bit_uint(),
     }
 
-# Read SunSpec header
+
+# Read SunSpec header.
 def getSunSpec(basereg):
-    # Read two bytes from basereg, a SUNSPEC device will start with 0x53756e53
-    # As 8bit ints they are 21365, 28243
+    # SunSpec header starts with 0x53756e53 (21365, 28243).
     try:
         response = client.read_holding_registers(basereg, count=2)
     except:
@@ -397,11 +397,11 @@ def getSunSpec(basereg):
         logger.debug(".. SunSpec device found. Reading Manufacturer info")
     else:
         return None
-    # There is a 16 bit string at basereg + 4 that contains Manufacturer
+    # Manufacturer string starts at basereg + 4.
     response = client.read_holding_registers(basereg + 4, count=16)
     decoder = SunSpecDecoder(response.registers)
     manufacturer = decoder.decode_string(16)
-    
+
     if "OUTBACK_POWER" in str(manufacturer.upper()):
         logger.debug(".. Outback Power device found")
     else:
@@ -414,15 +414,15 @@ def getSunSpec(basereg):
     blocksize = int(register.registers[0])
     return blocksize
 
+
 # Read the SunSpec block header and return its size, name and numeric DID.
 def getBlock(basereg):
-    #print(basereg) #DPO debug
     try:
         register = client.read_holding_registers(basereg)
     except:
         return None
     blockID = int(register.registers[0])
-    # Peek at block style
+    # Read block size.
     try:
         register = client.read_holding_registers(basereg + 1)
     except:
@@ -433,25 +433,22 @@ def getBlock(basereg):
         logger.warning("Unknown SunSpec device type with DID=" + str(blockID) + " at register " + str(basereg) + ". The scan stops here")
     return {"size": blocksize, "DID": blockname, "id": blockID}
 
-#------------------------------------------------
-#  MATE3 ModBus connection helper
-#------------------------------------------------
-# A new connection is opened at the beginning of every scan cycle and closed at
-# the end of that cycle. This keeps daemon mode resilient after temporary MATE3
-# or network errors. In run-once mode the same cycle logic is used only once.
+# MATE3 Modbus connection.
+# Open a new connection for each scan cycle.
 client   = None
 startReg = None
 
-# Connect to MATE3 and locate the first OutBack SunSpec data block.
+
+# Connect to MATE3 and locate the first OutBack SunSpec block.
 def connect_mate3():
     global client, startReg
 
     try:
-        logger.debug(".. Building MATE3 MODBUS connection")
+        logger.debug(".. Building MATE3 Modbus connection")
         client = ModbusClient(mate3_ip, port=mate3_modbus)
         client.connect()
 
-        logger.debug(".. Make sure we are indeed connected to an Outback power system")
+        logger.debug(".. Checking MATE3 SunSpec")
         reg  = sunspec_start_reg
         size = getSunSpec(reg)
 
@@ -465,11 +462,11 @@ def connect_mate3():
             return False
 
         startReg = reg + size + 4
-        logger.debug(".. Connected OK to an Outback system")
+        logger.debug(".. MATE3 connected")
         return True
 
     except Exception as e:
-        logger.warning(".. Failed to connect to MATE3. Enable SUNSPEC and check port. Retrying next cycle: " + str(e))
+        logger.warning(".. Failed to connect to MATE3. Enable SunSpec and check port. Retrying next cycle: " + str(e))
         try:
             if client is not None:
                 client.close()
@@ -478,82 +475,50 @@ def connect_mate3():
         client = None
         return False
 
-#This is the main loop
+# Main loop
 #--------------------------------------------------------------
 
 script_start_time = datetime.now()
 
-# MQTT discovery state - discovery must be published only once after the first
-# successful Mate3 scan, because the real client configuration is known only
-# after reading the SunSpec blocks.
+# Publish MQTT discovery once after the first successful MATE3 scan.
 mqtt_discovery_done = False
 
 
-# Sensor ids per inverter family. Every inverter family uses the same Home Assistant device name,
-# outback_inverter_n, so the sensors behind that device depend on which family is fitted. These are
-# named here rather than inline below so the union can be worked out for the retraction step.
+# Sensor IDs by inverter family, used for discovery cleanup.
 INVERTER_SENSOR_IDS = ["inverter_current", "charge_current", "buy_current", "sell_current", "battery_voltage", "battery_voltage_compensated", "ac_input", "ac_output", "ac_use", "operating_modes", "aux_relay", "error_flags", "warning_modes", "trafo_temp", "capacitor_temp", "fet_temp", "grid_input_mode", "charger_mode"]
 FX_INVERTER_SENSOR_IDS = INVERTER_SENSOR_IDS + ["output_kwh", "buy_kwh", "sell_kwh", "charger_kwh"]
 SPLIT_INVERTER_SENSOR_IDS = ["inverter_L1_current", "charge_L1_current", "buy_L1_current", "sell_L1_current", "inverter_L2_current", "charge_L2_current", "buy_L2_current", "sell_L2_current", "battery_voltage", "battery_voltage_compensated", "ac_input_L1", "ac_output_L1", "ac_input_L2", "ac_output_L2", "ac_use", "operating_modes", "aux_relay", "error_flags", "warning_modes", "trafo_L_temp", "capacitor_L_temp", "fet_L_temp", "trafo_R_temp", "capacitor_R_temp", "fet_R_temp", "grid_input_mode", "charger_mode"]
 
-# Every sensor id any inverter family can publish, used to clear the ones this system does not have.
+# All inverter sensor IDs that may require discovery cleanup.
 INVERTER_SENSOR_IDS_ALL = sorted(set(INVERTER_SENSOR_IDS + FX_INVERTER_SENSOR_IDS + SPLIT_INVERTER_SENSOR_IDS))
 
-# MQTT discovery retraction.
-#
-# Discovery configs and sensor values are both published with the retain flag, so the broker stores
-# one message per topic and replays it to every new subscriber. The topics are per sensor, so a
-# configuration change publishes a different set of topics rather than replacing the previous one:
-# nothing overwrites the topics that no longer apply, and their retained messages survive a broker
-# restart. Home Assistant subscribes, receives old and new alike, and creates the union. That is why
-# a sensor which stops being applicable - a different inverter family, a shunt role that is no longer
-# configured - stays in Home Assistant showing a stale value, and why deleting the device there does
-# not help.
-#
-# MQTT discovery has no "this is the complete set" message. An empty retained payload on a topic is
-# the only way to clear the broker copy, and on a config topic it also tells Home Assistant to drop
-# the entity. Which sensors are stale can be worked out from the code alone, so this needs no state
-# file and never reads back from the broker.
-#
-# Removing entities is somebody's data, so it is opt-in: stale sensors are always reported, but they
-# are only cleared when MQTT_discovery_cleanup is enabled.
+# MQTT discovery cleanup.
+# Empty retained payloads remove unused discovery and state topics.
+# Cleanup is opt-in through MQTT_discovery_cleanup.
 discovery_cleanup_hint_logged = False
 
 
-# Availability as last published, so the state is only sent when it changes.
+# Last published MATE3 communication status and Home Assistant availability.
+mate3_status            = None
 mqtt_availability_state = None
+mate3_failed_cycles     = 0
 
-# Tell Home Assistant whether the values it holds are still being refreshed.
-#
-# Every value is published retained and carries no timestamp, so when the MATE3
-# stops answering the last readings stay on the broker and Home Assistant goes
-# on showing them as current - indefinitely, and with no indication that the
-# data is hours or months old.
-#
-# A last will cannot cover this. Messages are sent with publish.single(), which
-# connects and disconnects per message, so the broker discards any will. More to
-# the point, the script is usually perfectly healthy when this happens: it is
-# the MATE3 that has gone away, which is a condition only the script itself can
-# report.
-def publish_availability(state):
-    global mqtt_availability_state
 
-    if MQTT_active != 'true' or state == mqtt_availability_state:
-        return
+def publish_mqtt_state(topic, state):
+    if MQTT_active != 'true':
+        return False
 
     MQTT_auth = None
     if len(MQTT_username) > 0:
         MQTT_auth = { 'username': MQTT_username, 'password': MQTT_password }
 
     try:
-        publish.single(MQTT_availability_topic, state, hostname=MQTT_broker, port=MQTT_port,
+        publish.single(topic, state, hostname=MQTT_broker, port=MQTT_port,
                        auth=MQTT_auth, qos=0, retain=True)
-        mqtt_availability_state = state
-        logger.info(" MQTT availability: " + state)
+        return True
     except Exception:
-        # Never fatal. Failing to say we are offline must not stop the next scan
-        # from being attempted, and the state is retried on the next change.
-        logger.exception("MQTT availability")
+        logger.exception("MQTT state publish")
+        return False
 
 
 # Remove stale Home Assistant discovery entities when cleanup is enabled.
@@ -583,16 +548,8 @@ def retract_discovery(dev_name, topic_prefix, stale_ids, MQTT_auth):
         publish.single(state_topic,  "", hostname=MQTT_broker, port=MQTT_port, auth=MQTT_auth, qos=0, retain=True)
         logger.debug(".... HA sensor retracted: " + dev_name + "_" + stale_id)
 
-# MQTT Home Assistant discovery.
-# Creates retained MQTT discovery entities after the first successful Mate3 scan.
-# Devices are created only from real devices detected during the SunSpec scan:
-#   - Outback Inverter n
-#   - Outback Charger n
-#   - Outback FNDC
-#   - Outback Summary  (calculated totals)
-#   - Outback System   (script/internal values)
-# The function publishes discovery config only; real sensor values are published
-# later through the normal MQTT data path.
+
+# Publish MQTT discovery for devices detected during the MATE3 scan.
 def publish_mqtt_discovery(detected_devices, MQTT_auth):
 
     if MQTT_active != 'true' or MQTT_discovery_active != 'true':
@@ -601,14 +558,13 @@ def publish_mqtt_discovery(detected_devices, MQTT_auth):
     manufacturer = "Outback Power"
     sw_ver       = script_ver
 
-    # Summary discovery flags are set while processing detected devices.
-    # This keeps the logic simple and avoids scanning detected_devices twice.
+    # Track which Summary sensors apply to detected hardware.
     summary_charger        = False
     summary_fndc           = False
     summary_inverter       = False
     summary_split_inverter = False
 
-    # Process each detected hardware device and publish its own HA sensors.
+    # Publish HA sensors for each detected device.
     for dev in detected_devices:
 
         msg      = {}
@@ -627,10 +583,7 @@ def publish_mqtt_discovery(detected_devices, MQTT_auth):
             display_name = "Outback FNDC"
             topic_prefix = "outback/fndc"
 
-            # The shunt sensors are displayed under the label configured for them, so Home Assistant
-            # shows 'Solar current' rather than 'shunt_b_current'. Only the display name uses the
-            # label - the ids below still drive uniq_id and the state topic, so renaming a shunt in
-            # config.cfg does not create a duplicate entity or break existing automations.
+            # Shunt labels affect display names only; IDs and topics stay stable.
             names        = ["battery_voltage", "state_of_charge", "battery_temperature", shunt_list[0] + " current", shunt_list[1] + " current", shunt_list[2] + " current", "charge_params_met", "today_min_soc", "today_max_soc", "days_since_charge_met", "today_net_input_ah", "today_net_output_ah", "todays_net_input_kWh", "todays_net_output_kWh", "min_voltage", "max_voltage"]
             ids          = ["battery_voltage", "state_of_charge", "battery_temperature", "shunt_a_current", "shunt_b_current", "shunt_c_current", "charge_params_met", "today_min_soc", "today_max_soc", "days_since_charge_met", "today_net_input_ah", "today_net_output_ah", "todays_net_input_kWh", "todays_net_output_kWh", "min_voltage", "max_voltage"]
             dev_cla      = ["voltage", "battery", "temperature", "current", "current", "current", None, "battery", "battery", None, None, None, "energy", "energy", "voltage", "voltage"]
@@ -674,10 +627,7 @@ def publish_mqtt_discovery(detected_devices, MQTT_auth):
         # -------------------------------------------------
         # FX / VFX series inverter sensors
         # -------------------------------------------------
-        # Same device name, topic prefix and sensor names as the single phase Radian inverter above,
-        # so Home Assistant automations are portable between the two families. The FX real time block
-        # additionally reports daily energy counters, which the Radian blocks do not have, so those
-        # are published only for FX hardware rather than being added to the shared list.
+        # FX/VFX uses the shared inverter topics plus its daily energy counters.
         elif dev_type == "fx_inverter":
 
             summary_inverter = True
@@ -712,8 +662,7 @@ def publish_mqtt_discovery(detected_devices, MQTT_auth):
         else:
             continue
 
-        # An inverter device carries different sensors depending on its family, so anything this
-        # family does not publish is cleared. The other device types have a fixed sensor set.
+        # Clear inverter sensors not used by the detected family.
         if dev_type in ("inverter", "fx_inverter", "split_inverter"):
             retract_discovery(dev_name, topic_prefix, set(INVERTER_SENSOR_IDS_ALL) - set(ids), MQTT_auth)
 
@@ -753,9 +702,7 @@ def publish_mqtt_discovery(detected_devices, MQTT_auth):
     # -------------------------------------------------
     # Summary sensors
     # -------------------------------------------------
-    # Summary discovery publishes calculated totals under the Outback Summary
-    # device. The flags below were set while processing detected devices, so
-    # only sensors that make sense for the current system are created.
+    # Publish calculated totals under OutBack Summary.
 
     dev_name     = "outback_summary"
     display_name = "Outback Summary"
@@ -770,12 +717,7 @@ def publish_mqtt_discovery(detected_devices, MQTT_auth):
 
     catalogue    = []
 
-    # Append one calculated Summary sensor definition to the discovery lists.
-    # Every sensor is recorded in the catalogue whether or not it applies to this system, so the
-    # retraction below always knows the full set this script can publish. Passing 'active' rather
-    # than wrapping the calls in an if keeps the catalogue complete by construction - a sensor
-    # cannot be added without the retraction learning about it.
-    # Add one Summary sensor to the discovery lists when it is active.
+    # Add an active Summary sensor to discovery.
     def add_summary_sensor(name, device_class, state_class, unit, active=True):
         catalogue.append(name)
         if not active:
@@ -797,8 +739,7 @@ def publish_mqtt_discovery(detected_devices, MQTT_auth):
     add_summary_sensor("battery_in_power",              "power",   "measurement",      "W",   active=summary_fndc)
     add_summary_sensor("battery_out_power",             "power",   "measurement",      "W",   active=summary_fndc)
 
-    # One sensor pair per shunt role. Every role is offered to the catalogue so that a role removed
-    # from config.cfg has its sensors cleared on the next run.
+    # Add current and power sensors for configured shunt roles.
     for role in SHUNT_SOURCE_ROLES + SHUNT_SINK_ROLES:
         role_active = summary_fndc and shunt_roles_configured and role in shunt_role_list
         add_summary_sensor("shunt_" + role + "_current", "current", "measurement", "A", active=role_active)
@@ -813,8 +754,7 @@ def publish_mqtt_discovery(detected_devices, MQTT_auth):
     add_summary_sensor("sell_total_current",            "current", "measurement",      "A",   active=summary_inverter)
     add_summary_sensor("inverter_charge_total_current", "current", "measurement",      "A",   active=summary_inverter)
 
-    # sell_total_power is valid for both single and split inverter systems.
-    # For split systems it is the sum of L1 and L2 sell power.
+    # Total sell power supports both single and split phase systems.
     add_summary_sensor("sell_total_power",              "power",   "measurement",      "W",   active=summary_inverter or summary_split_inverter)
 
     add_summary_sensor("inverter_L1_total_current",     "current", "measurement",      "A",   active=summary_split_inverter)
@@ -834,8 +774,7 @@ def publish_mqtt_discovery(detected_devices, MQTT_auth):
     add_summary_sensor("charge_L1_total_power",         "power",   "measurement",      "W",   active=summary_split_inverter)
     add_summary_sensor("charge_L2_total_power",         "power",   "measurement",      "W",   active=summary_split_inverter)
 
-    # Clear the summary sensors this system does not have, including any left behind by an earlier
-    # run with different hardware or a different shunt role configuration.
+    # Clear Summary sensors not used by the current configuration.
     retract_discovery(dev_name, "outback/summary", set(catalogue) - set(ids), MQTT_auth)
 
     for n in range(len(ids)):
@@ -873,7 +812,7 @@ def publish_mqtt_discovery(detected_devices, MQTT_auth):
     # -------------------------------------------------
     # System sensors
     # -------------------------------------------------
-    # Internal script/runtime metrics. These are not physical Mate3 registers.
+    # Internal script/runtime metrics, not physical MATE3 registers.
     dev_name     = "outback_system"
     display_name = "Outback System"
     model        = "System"
@@ -917,24 +856,43 @@ def publish_mqtt_discovery(detected_devices, MQTT_auth):
 
         publish.single(state_topic, message, hostname=MQTT_broker, port=MQTT_port, auth=MQTT_auth, qos=0, retain=True)
 
+
 # Read the detected SunSpec blocks and build the current system data.
 def main():
-    global mqtt_discovery_done, client, startReg
+    global mqtt_discovery_done, client, startReg, mate3_status, mqtt_availability_state, mate3_failed_cycles
 
     if connect_mate3() == False:
-        publish_availability(MQTT_payload_offline)
+        if mate3_status != MQTT_payload_offline:
+            if publish_mqtt_state(MQTT_status_topic, MQTT_payload_offline):
+                mate3_status = MQTT_payload_offline
+                logger.info(" MATE3 status: " + MQTT_payload_offline)
+
+        if daemon_active == 'true':
+            if MQTT_availability_threshold > 0:
+                mate3_failed_cycles += 1
+                if mate3_failed_cycles <= MQTT_availability_threshold:
+                    logger.info(" MATE3 communication failure: " + str(mate3_failed_cycles) + "/" + str(MQTT_availability_threshold) + " cycles")
+                if mate3_failed_cycles == MQTT_availability_threshold and mqtt_availability_state != MQTT_payload_offline:
+                    if publish_mqtt_state(MQTT_availability_topic, MQTT_payload_offline):
+                        mqtt_availability_state = MQTT_payload_offline
+                        logger.info(" MQTT availability: " + MQTT_payload_offline)
+        else:
+            # Single run: availability follows the MATE3 result immediately; no threshold.
+            if mqtt_availability_state != MQTT_payload_offline:
+                if publish_mqtt_state(MQTT_availability_topic, MQTT_payload_offline):
+                    mqtt_availability_state = MQTT_payload_offline
+                    logger.info(" MQTT availability: " + MQTT_payload_offline)
         return False
 
-    # MQTT discovery device list. Filled during the normal SunSpec scan; no
-    # extra Modbus reads are made only for discovery.
-    detected_devices   = []                           # used for MQTT discovery - detected devices from current Mate3 scan
+    # Build discovery data during the normal SunSpec scan.
+    detected_devices   = []                           # used for MQTT discovery - detected devices from current MATE3 scan
     devices            = []                           # used for JSON file - list of data for all devices
     various            = []                           # used for JSON file - different data not connected with MateMonitoring project
-    db_devices_values  = []                           # used for MariaDB upload - list of all data for all devices  
-    db_devices_sql     = []                           # used for MariaDB upload - list of all data for all devices 
-    mqtt_devices       = []                           # used for MQTT - list with topics and payloads 
+    db_devices_values  = []                           # used for MariaDB upload - list of all data for all devices
+    db_devices_sql     = []                           # used for MariaDB upload - list of all data for all devices
+    mqtt_devices       = []                           # used for MQTT - list with topics and payloads
 
-    # Calculated summary values - aggregated during the normal SunSpec scan.
+    # Calculated summary values from the current SunSpec scan.
     pv_total_power             = 0      # total PV power from all charge controllers (W)
     pv_daily_kwh               = 0      # total PV energy today from all charge controllers (kWh)
     pv_total_current           = 0      # total PV input current from all charge controllers (A)
@@ -971,13 +929,13 @@ def main():
     charge_L2_total_current    = 0      # total split phase L2 charger current (A)
     charge_L1_total_power      = 0      # total split phase L1 charger power (W)
     charge_L2_total_power      = 0      # total split phase L2 charger power (W)
-    
-    start_run = datetime.now()                  # used only for runtime calculation    
-    
+
+    start_run = datetime.now()                  # used only for runtime calculation
+
     curent_date_time = datetime.now()
     date_str         = curent_date_time.strftime("%Y-%m-%dT%H:%M:%S")
-    date_sql         = datetime.now().replace(second=0, microsecond=0)   
-    
+    date_sql         = datetime.now().replace(second=0, microsecond=0)
+
     time = {                                      # used for JSON file - server time now
         "relay_local_time"  : date_str,
         "mate_local_time"   : date_str,
@@ -1004,7 +962,7 @@ def main():
 
         detected_blocks.append(blockResult['DID'])
 
-        try:        
+        try:
             if "Split Phase Radian Inverter Real Time Block" in blockResult['DID']:
                 response = client.read_holding_registers(
                     reg,
@@ -1018,7 +976,7 @@ def main():
                 address=port+1
                 logger.debug(".... Connected on HUB port " + str(radian_split[2]))
 
-                # MQTT discovery - register detected split phase inverter with HUB port label.
+                # Register split phase inverter for MQTT discovery.
                 detected_devices.append({
                     "type"  : "split_inverter",
                     "index" : inverters,
@@ -1027,17 +985,17 @@ def main():
                 })
                 logger.debug(".... HA device: Outback Inverter " + str(inverters))
                 inverter_index_by_address[address] = inverters
-       
+
                 # Inverter L1 phase data
                 gs_single_inverter_output_current = round(radian_split[7],2)
                 logger.debug(".... GS L1 Inverted output current (A) " + str(gs_single_inverter_output_current))
-               
+
                 gs_single_inverter_charge_current = round(radian_split[8],2)
                 logger.debug(".... GS L1 Charger current (A) " + str(gs_single_inverter_charge_current))
-                
+
                 gs_single_inverter_buy_current = round(radian_split[9],2)
                 logger.debug(".... GS L1 Input current (A) " + str(gs_single_inverter_buy_current))
-                
+
                 GS_Single_Inverter_Sell_Current = round(radian_split[10],2)
                 logger.debug(".... GS L1 Sell current (A) " + str(GS_Single_Inverter_Sell_Current))
 
@@ -1046,17 +1004,17 @@ def main():
 
                 gs_single_output_ac_voltage = round(radian_split[13],2)
                 logger.debug(".... GS L1 Voltage Out (V) " + str(gs_single_output_ac_voltage))
-                
+
                 # Inverter L2 phase data
                 gs_single_inverter_l2_output_current = round(radian_split[14],2)
                 logger.debug(".... GS L2 Inverted output current (A) " + str(gs_single_inverter_l2_output_current))
-               
+
                 gs_single_inverter_charge_l2_current = round(radian_split[15],2)
                 logger.debug(".... GS L2 Charger current (A) " + str(gs_single_inverter_charge_l2_current))
-                
+
                 gs_single_inverter_buy_l2_current = round(radian_split[16],2)
                 logger.debug(".... GS L2 Buy current (A) " + str(gs_single_inverter_buy_l2_current))
-                
+
                 GS_Single_Inverter_Sell_l2_Current = round(radian_split[17],2)
                 logger.debug(".... GS L2 Sell current (A) " + str(GS_Single_Inverter_Sell_l2_Current))
 
@@ -1066,7 +1024,7 @@ def main():
                 gs_single_output_ac_l2_voltage = round(radian_split[20],2)
                 logger.debug(".... GS L2 Voltage Out (V) " + str(gs_single_output_ac_l2_voltage))
 
-                # Calculated summary - split phase inverter values are aggregated by phase.
+                # Aggregate split phase inverter values by phase.
                 inverter_L1_total_current += gs_single_inverter_output_current
                 inverter_L2_total_current += gs_single_inverter_l2_output_current
                 buy_L1_total_current      += gs_single_inverter_buy_current
@@ -1088,15 +1046,15 @@ def main():
 
                 gs_single_inverter_operating_mode = int(radian_split[21])
                 operating_modes = decode_enum(gs_single_inverter_operating_mode, get_sdc_values(blockResult["id"], "GS_Split_Inverter_Operating_mode"), "Radian operating mode")
-                logger.debug(".... GS Inverter Operating Mode " + str(gs_single_inverter_operating_mode) +" "+ operating_modes)  
-                
+                logger.debug(".... GS Inverter Operating Mode " + str(gs_single_inverter_operating_mode) +" "+ operating_modes)
+
                 gs_single_ac_input_state = round(int(radian_split[38]),2)
                 ac_use = decode_enum(gs_single_ac_input_state, get_sdc_values(blockResult["id"], "GS_Split_AC_Input_State"), "Radian AC input state")
                 logger.debug(".... GS AC USE (Y/N) " + str(gs_single_ac_input_state) + " " + ac_use)
-                
+
                 gs_single_battery_voltage = round(int(radian_split[24]) * 0.1,1)
                 logger.debug(".... GS Battery voltage (V) " + str(gs_single_battery_voltage))
-                
+
                 gs_single_temp_compensated_target_voltage = round(int(radian_split[25]) * 0.1,2)
                 logger.debug(".... GS Battery target voltage - temp compensated (V) " + str(gs_single_temp_compensated_target_voltage))
 
@@ -1106,29 +1064,29 @@ def main():
 
                 GS_Single_L_Module_Transformer_Temperature = int(radian_split[28])
                 logger.debug(".... GS L Transformer Temperature  " + str(GS_Single_L_Module_Transformer_Temperature))
-                
+
                 GS_Single_L_Module_Capacitor_Temperature = int(radian_split[29])
                 logger.debug(".... GS L Capacitor Temperature  " + str(GS_Single_L_Module_Capacitor_Temperature))
-  
+
                 GS_Single_R_Module_FET_Temperature = int(radian_split[31])
-                logger.debug(".... GS L FET Temperature  " + str(GS_Single_R_Module_FET_Temperature))                  
+                logger.debug(".... GS R FET Temperature  " + str(GS_Single_R_Module_FET_Temperature))
 
                 GS_Single_R_Module_Transformer_Temperature = int(radian_split[32])
-                logger.debug(".... GS L Transformer Temperature  " + str(GS_Single_R_Module_Transformer_Temperature))
-                
+                logger.debug(".... GS R Transformer Temperature  " + str(GS_Single_R_Module_Transformer_Temperature))
+
                 GS_Single_R_Module_Capacitor_Temperature = int(radian_split[33])
-                logger.debug(".... GS L Capacitor Temperature  " + str(GS_Single_R_Module_Capacitor_Temperature))
- 
+                logger.debug(".... GS R Capacitor Temperature  " + str(GS_Single_R_Module_Capacitor_Temperature))
+
                 GS_Single_L_Module_FET_Temperature = int(radian_split[30])
-                logger.debug(".... GS L FET Temperature  " + str(GS_Single_L_Module_FET_Temperature))    
+                logger.debug(".... GS L FET Temperature  " + str(GS_Single_L_Module_FET_Temperature))
 
                 gs_single_battery_temperature = decode_int16(int(radian_split[34]))
-                logger.debug(".... GS Battery temperature (V) " + str(gs_single_battery_temperature))
-               
+                logger.debug(".... GS Battery temperature " + str(gs_single_battery_temperature))
+
                 GS_Split_Error_Flags = int(radian_split[22])
                 logger.debug(".... GS Error Flags " + str(GS_Split_Error_Flags))
                 error_flags = decode_flags(GS_Split_Error_Flags, get_sdc_values(blockResult["id"], "GS_Split_Error_Flags"))
-                
+
                 GS_Single_Warning_Flags = int(radian_split[23])
                 logger.debug(".... GS Warning Flags " + str(GS_Single_Warning_Flags))
                 warning_flags = decode_flags(GS_Single_Warning_Flags, get_sdc_values(blockResult["id"], "GS_Split_Warning_Flags"))
@@ -1167,8 +1125,8 @@ def main():
                   ],
                   "label":device_list[port]}
                 devices.append(devices_array)     # append FXR data to devices
-                
-                # GS data - MQTT preparation   
+
+                # GS data - MQTT preparation
                 mqtt_devices.append({
                              "outback/inverters/" + str(inverters) + "/inverter_L1_current"         : gs_single_inverter_output_current,
                              "outback/inverters/" + str(inverters) + "/charge_L1_current"           : gs_single_inverter_charge_current,
@@ -1196,11 +1154,11 @@ def main():
                              "outback/inverters/" + str(inverters) + "/capacitor_R_temp"            : GS_Single_R_Module_Capacitor_Temperature,
                              "outback/inverters/" + str(inverters) + "/fet_R_temp"                  : GS_Single_R_Module_FET_Temperature
                              })
-      
+
         except Exception as e:
             logger.warning("port: " + str(port) + " FXR module " + str(e))
 
-        try:        
+        try:
             if "Single Phase Radian Inverter Real Time Block" in blockResult['DID']:
                 response = client.read_holding_registers(
                     reg,
@@ -1214,7 +1172,7 @@ def main():
                 address=port+1
                 logger.debug(".... Connected on HUB port " + str(radian_single[2]))
 
-                # MQTT discovery - register detected inverter with HUB port label.
+                # Register inverter for MQTT discovery.
                 detected_devices.append({
                     "type"  : "inverter",
                     "index" : inverters,
@@ -1223,44 +1181,44 @@ def main():
                 })
                 logger.debug(".... HA device: Outback Inverter " + str(inverters))
                 inverter_index_by_address[address] = inverters
-       
+
                 # Inverter Output current
                 gs_single_inverter_output_current = round(radian_single[7],2)
                 logger.debug(".... FXR Inverted output current (A) " + str(gs_single_inverter_output_current))
-               
+
                 gs_single_inverter_charge_current = round(radian_single[8],2)
                 logger.debug(".... FXR Charger current (A) " + str(gs_single_inverter_charge_current))
-                
+
                 gs_single_inverter_buy_current = round(radian_single[9],2)
                 logger.debug(".... FXR Input current (A) " + str(gs_single_inverter_buy_current))
-                
+
                 gs_single_ac_input_voltage = round(radian_single[30],2)
                 logger.debug(".... FXR AC Input Voltage " + str(gs_single_ac_input_voltage))
 
                 gs_single_output_ac_voltage = round(radian_single[13],2)
                 logger.debug(".... FXR Voltage Out (V) " + str(gs_single_output_ac_voltage))
-                
+
                 GS_Single_Inverter_Sell_Current = round(radian_single[10],2)
                 logger.debug(".... FXR Sell current (A) " + str(GS_Single_Inverter_Sell_Current))
 
-                # Calculated summary - single phase inverter currents.
+                # Aggregate single phase inverter currents.
                 inverter_total_current += gs_single_inverter_output_current
                 buy_total_current      += gs_single_inverter_buy_current
                 sell_total_current     += GS_Single_Inverter_Sell_Current
                 sell_total_power       += GS_Single_Inverter_Sell_Current * gs_single_ac_input_voltage
                 inverter_charge_total_current   += gs_single_inverter_charge_current
-               
+
                 gs_single_inverter_operating_mode = int(radian_single[14])
                 operating_modes = decode_enum(gs_single_inverter_operating_mode, get_sdc_values(blockResult["id"], "GS_Single_Inverter_Operating_mode"), "Radian operating mode")
-                logger.debug(".... FXR Inverter Operating Mode " + str(gs_single_inverter_operating_mode) +" "+ operating_modes)  
-                
+                logger.debug(".... FXR Inverter Operating Mode " + str(gs_single_inverter_operating_mode) +" "+ operating_modes)
+
                 gs_single_ac_input_state = round(int(radian_single[31]),2)
                 ac_use = decode_enum(gs_single_ac_input_state, get_sdc_values(blockResult["id"], "GS_Single_AC_Input_State"), "Radian AC input state")
                 logger.debug(".... FXR AC USE (Y/N) " + str(gs_single_ac_input_state) + " " + ac_use)
-                
+
                 gs_single_battery_voltage = round(int(radian_single[17]) * 0.1,1)
                 logger.debug(".... FXR Battery voltage (V) " + str(gs_single_battery_voltage))
-                
+
                 gs_single_temp_compensated_target_voltage = round(int(radian_single[18]) * 0.1,2)
                 logger.debug(".... FXR Battery target voltage - temp compensated (V) " + str(gs_single_temp_compensated_target_voltage))
 
@@ -1270,20 +1228,20 @@ def main():
 
                 GS_Single_L_Module_Transformer_Temperature = int(radian_single[21])
                 logger.debug(".... FXR L Transformer Temperature  " + str(GS_Single_L_Module_Transformer_Temperature))
-                
+
                 GS_Single_L_Module_Capacitor_Temperature = int(radian_single[22])
                 logger.debug(".... FXR L Capacitor Temperature  " + str(GS_Single_L_Module_Capacitor_Temperature))
-                
+
                 GS_Single_L_Module_FET_Temperature = int(radian_single[23])
-                logger.debug(".... FXR L FET Temperature  " + str(GS_Single_L_Module_FET_Temperature))                  
+                logger.debug(".... FXR L FET Temperature  " + str(GS_Single_L_Module_FET_Temperature))
 
                 gs_single_battery_temperature = decode_int16(int(radian_single[27]))
-                logger.debug(".... FXR Battery temperature (V) " + str(gs_single_battery_temperature))
-               
+                logger.debug(".... FXR Battery temperature " + str(gs_single_battery_temperature))
+
                 GS_Split_Error_Flags = int(radian_single[15])
                 logger.debug(".... FXR Error Flags " + str(GS_Split_Error_Flags))
                 error_flags = decode_flags(GS_Split_Error_Flags, get_sdc_values(blockResult["id"], "GS_Single_Error_Flags"))
-                
+
                 GS_Single_Warning_Flags = int(radian_single[16])
                 logger.debug(".... FXR Warning Flags " + str(GS_Single_Warning_Flags))
                 warning_flags = decode_flags(GS_Single_Warning_Flags, get_sdc_values(blockResult["id"], "GS_Single_Warning_Flags"))
@@ -1313,18 +1271,18 @@ def main():
                   ],
                   "label":device_list[port]}
                 devices.append(devices_array)     # append FXR data to devices
-              
+
                 # FXR data - MariaDB SQL preparation
                 db_devices_values.append ((date_sql,address,5,gs_single_inverter_output_current,gs_single_inverter_charge_current,gs_single_inverter_buy_current,
                 gs_single_ac_input_voltage,gs_single_output_ac_voltage,GS_Single_Inverter_Sell_Current,operating_modes,
                 error_flags,ac_use,gs_single_battery_voltage,aux_relay,warning_flags))
-                
+
                 db_devices_sql.append ("INSERT INTO monitormate_fx \
                 (date,address,device_id,inverter_current,charge_current,buy_current,ac_input_voltage,ac_output_voltage,\
                 sell_current,operational_mode,error_modes,ac_mode,battery_voltage,misc,warning_modes) \
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)")
 
-                # FXR data - MQTT preparation   
+                # FXR data - MQTT preparation
                 mqtt_devices.append({
                              "outback/inverters/" + str(inverters) + "/inverter_current"            : gs_single_inverter_output_current,
                              "outback/inverters/" + str(inverters) + "/charge_current"              : gs_single_inverter_charge_current,
@@ -1343,10 +1301,10 @@ def main():
                              "outback/inverters/" + str(inverters) + "/capacitor_temp"              : GS_Single_L_Module_Capacitor_Temperature,
                              "outback/inverters/" + str(inverters) + "/fet_temp"                    : GS_Single_L_Module_FET_Temperature
                              })
-      
+
         except Exception as e:
             logger.warning("port: " + str(port) + " FXR module " + str(e))
-        
+
         try:
             if "Radian Inverter Configuration Block" in blockResult['DID']:
                 response = client.read_holding_registers(
@@ -1442,7 +1400,7 @@ def main():
                 fx_ac_input_voltage = round(fx[22] * ac_voltage_scale, 2)
                 logger.debug(".... FX AC Input Voltage " + str(fx_ac_input_voltage))
 
-                # Calculated summary - single phase inverter currents.
+                # Aggregate single phase inverter currents.
                 inverter_total_current += fx_inverter_output_current
                 buy_total_current      += fx_inverter_buy_current
                 sell_total_current     += fx_inverter_sell_current
@@ -1629,29 +1587,29 @@ def main():
                     "name"  : device_list[port]
                 })
                 logger.debug(".... HA device: Outback " + str(device_list[port]).strip())
-     
+
                 cc_batt_current = round(int(charger[10]) * 0.1,2)    # correction value *0.1
                 logger.debug(".... CC Battery Current (A) " + str(cc_batt_current))
-     
+
                 cc_array_current = round(int(charger[11]),2)
                 logger.debug(".... CC Array Current (A) " + str(cc_array_current))
-                
+
                 cc_array_voltage = round(int(charger[9]) * 0.1,2)
                 logger.debug(".... CC Array Voltage " + str(cc_array_voltage))
-                
+
                 CC_Todays_KW = round(int(charger[18]) * 0.1,2)
                 logger.debug(".... CC Daily_KW (KW) " + str(CC_Todays_KW))
-                
+
                 CC_Watts = round(int(charger[13]),2)
                 logger.debug(".... CC Actual_watts (W) " + str(CC_Watts))
 
                 cc_charger_state = round(int(charger[12]),2)
                 logger.debug(".... CC Charger State " + str(cc_charger_state))  # 0=Silent,1=Float,2=Bulk,3=Absorb,4=EQ
                 cc_mode = decode_enum(cc_charger_state, get_sdc_values(blockResult["id"], "CC_Charger_State"), "charge controller state")
-     
+
                 cc_batt_voltage = round(int(charger[8]) * 0.1,2)
                 logger.debug(".... CC Battery Voltage (V) " + str(cc_batt_voltage))
-     
+
                 CC_Todays_AH = round(int(charger[19]),2)
                 logger.debug(".... CC Daily_AH (A) " + str(CC_Todays_AH))
 
@@ -1672,7 +1630,7 @@ def main():
                     "daily_ah"        : CC_Todays_AH,
                     "daily_kwh"       : CC_Todays_KW
                 }
-          
+
             if "Charge Controller Configuration block" in blockResult['DID']:           #some CC parameters are in configuration block
                 response = client.read_holding_registers(
                     reg,
@@ -1696,21 +1654,21 @@ def main():
                 cc_batt_voltage = charger_data["battery_voltage"]
                 CC_Todays_AH = charger_data["daily_ah"]
                 CC_Todays_KW = charger_data["daily_kwh"]
-                
+
                 CCconfig_AUX_Mode   = int(charger_config[32])
                 logger.debug(".... CC Aux Mode " + str(CCconfig_AUX_Mode))
-              
+
                 aux_mode = decode_enum(CCconfig_AUX_Mode, get_sdc_values(blockResult["id"], "CCconfig_AUX_Mode"), "charge controller AUX mode")
-                
+
                 CCconfig_AUX_State  = int(charger_config[34])
                 logger.debug(".... CC Aux State " + str(CCconfig_AUX_State))
                 aux_state = decode_enum(CCconfig_AUX_State, get_sdc_values(blockResult["id"], "CCconfig_AUX_State"), "charge controller AUX state")
-                
+
                 CCconfig_Faults = int(charger_config[9])
                 logger.debug(".... CC Error Flags " + str(CCconfig_Faults))
                 error_flags = decode_flags(CCconfig_Faults, get_sdc_values(blockResult["id"], "CCconfig_Faults"))
 
-                # Controlers data - JSON preparation
+                # Charge controller data - JSON preparation
                 devices_array= {
                   "address"         : address,
                   "device_id"       : 3,
@@ -1731,13 +1689,13 @@ def main():
                     }
                 devices.append(devices_array)
 
-                # Controlers data - MariaDB SQL preparation
+                # Charge controller data - MariaDB SQL preparation
                 db_devices_values.append((date_sql,address,3,cc_batt_current,cc_array_current,cc_array_voltage,CC_Todays_KW,aux_mode,aux_state,error_flags,cc_mode,cc_batt_voltage,CC_Todays_AH))
                 db_devices_sql.append ("INSERT INTO monitormate_cc \
                 (date,address,device_id,charge_current,pv_current,pv_voltage,daily_kwh,aux_mode,aux,error_modes,charge_mode,battery_voltage,daily_ah) \
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)")
-                
-                #controlers data - MQTT data preparation
+
+                # Charge controller data - MQTT preparation
                 mqtt_devices.append({
                     "outback/chargers/" + str(charger_index) + "/charger_current" : cc_batt_current,
                     "outback/chargers/" + str(charger_index) + "/pv_current"      : cc_array_current,
@@ -1750,8 +1708,8 @@ def main():
                     "outback/chargers/" + str(charger_index) + "/daily_ah"        : CC_Todays_AH,
                     "outback/chargers/" + str(charger_index) + "/daily_kwh"       : CC_Todays_KW,
                     "outback/chargers/" + str(charger_index) + "/charge_mode"     : cc_mode
-                    })                 
-        
+                    })
+
         except Exception as e:
             logger.warning("port: " + str(port) + " CC module " + str(e))
 
@@ -1780,10 +1738,10 @@ def main():
 
                 fn_shunt_a_current = round(decode_int16(int(fndc[8])) * 0.1,2)
                 logger.debug(".... FN Shunt A Current (A) " + str(fn_shunt_a_current))
-                
+
                 fn_shunt_b_current = round(decode_int16(fndc[9]) * 0.1,2)
                 logger.debug(".... FN Shunt B Current (A) " + str(fn_shunt_b_current))
-               
+
                 fn_shunt_c_current = round(decode_int16(int(fndc[10])) * 0.1,2)
                 logger.debug(".... FN Shunt C Current (A) " + str(fn_shunt_c_current))
 
@@ -1830,7 +1788,7 @@ def main():
 
                 fn_state_of_charge = int(fndc[27])
                 logger.debug(".... FN State of Charge " + str(fn_state_of_charge))
-                
+
                 FN_Status_Flags  = int(fndc[14])
                 logger.debug(".... FN Status Flag " + str(FN_Status_Flags))
                 charge_params_met="false"
@@ -1856,43 +1814,43 @@ def main():
 
                 FN_Shunt_B_Accumulated_kWh = round(decode_int16(int(fndc[18])) * 0.01,2)
                 logger.debug(".... FN FN_Shunt_B_Accumulated_kWh " + str(FN_Shunt_B_Accumulated_kWh))
-                     
+
                 FN_Shunt_C_Accumulated_AH = round(decode_int16(int(fndc[19])),2)
                 logger.debug(".... FN FN_Shunt_C_Accumulated_AH " + str(FN_Shunt_C_Accumulated_AH))
 
                 FN_Shunt_C_Accumulated_kWh = round(decode_int16(int(fndc[20])) * 0.01,2)
                 logger.debug(".... FN FN_Shunt_C_Accumulated_kWh " + str(FN_Shunt_C_Accumulated_kWh))
-                
+
                 FN_Days_Since_Charge_Parameters_Met = round(int((fndc[26])) * 0.1,2)
                 logger.debug(".... FN days_since_full " + str(FN_Days_Since_Charge_Parameters_Met))
-                
+
                 FN_Todays_Minimum_SOC = int(fndc[28])
                 logger.debug(".... FN Todays_Minimum_SOC " + str(FN_Todays_Minimum_SOC))
 
                 FN_Todays_Maximum_SOC = int(fndc[29])
                 logger.debug(".... FN Todays_Maximum_SOC " + str(FN_Todays_Maximum_SOC))
-                
+
                 FN_Todays_NET_Input_AH = round(int(fndc[30]),2)
                 logger.debug(".... FN Todays_NET_Input_AH " + str(FN_Todays_NET_Input_AH))
 
                 FN_Todays_NET_Input_kWh = round(int(fndc[31]) * 0.01,2)
                 logger.debug(".... FN Todays_NET_Input_kWh " + str(FN_Todays_NET_Input_kWh))
-                
+
                 FN_Todays_NET_Output_AH = round(int(fndc[32]),2)
                 logger.debug(".... FN Todays_NET_Output_AH " + str(FN_Todays_NET_Output_AH))
-                
+
                 FN_Todays_NET_Output_kWh = round(int(fndc[33]) * 0.01,2)
                 logger.debug(".... FN Todays_NET_Output_kWh " + str(FN_Todays_NET_Output_kWh))
 
                 FN_Charge_Factor_Corrected_NET_Battery_AH = round(decode_int16(int(fndc[36])),2)
                 logger.debug(".... FN Charge_Factor_Corrected_NET_Battery_AH " + str(FN_Charge_Factor_Corrected_NET_Battery_AH))
-                
+
                 FN_Charge_Factor_Corrected_NET_Battery_kWh = round(decode_int16(int(fndc[37])) * 0.01,2)
                 logger.debug(".... FN_Charge_Factor_Corrected_NET_Battery_kWh " + str(FN_Charge_Factor_Corrected_NET_Battery_kWh))
-                
+
                 FN_Todays_Minimum_Battery_Voltage = round(decode_int16(int(fndc[38])) * 0.1 ,2)
-                logger.debug(".... FN_Todays_Minimum_Battery_Voltage " + str(FN_Todays_Minimum_Battery_Voltage))                
-                
+                logger.debug(".... FN_Todays_Minimum_Battery_Voltage " + str(FN_Todays_Minimum_Battery_Voltage))
+
                 FN_Todays_Maximum_Battery_Voltage = round(decode_int16(int(fndc[41])) * 0.1 ,2)
                 logger.debug(".... FN_Todays_Maximum_Battery_Voltage " + str(FN_Todays_Maximum_Battery_Voltage))
 
@@ -1954,15 +1912,15 @@ def main():
                 FN_Charge_Factor_Corrected_NET_Battery_kWh = fndc_data["charge_factor_corrected_net_batt_kwh"]
                 FN_Todays_Minimum_Battery_Voltage = fndc_data["min_voltage"]
                 FN_Todays_Maximum_Battery_Voltage = fndc_data["max_voltage"]
-                
+
                 FNconfig_Shunt_A_Enabled = int(fndc_config[14])
                 Shunt_A_Enabled = decode_enum(FNconfig_Shunt_A_Enabled, get_sdc_values(blockResult["id"], "FNconfig_Shunt_A_Enabled"), "FNDC shunt A enabled")
                 logger.debug(".... FN Shunt_A_Enabled " + Shunt_A_Enabled)
-                
+
                 FNconfig_Shunt_B_Enabled = int(fndc_config[15])
                 Shunt_B_Enabled = decode_enum(FNconfig_Shunt_B_Enabled, get_sdc_values(blockResult["id"], "FNconfig_Shunt_B_Enabled"), "FNDC shunt B enabled")
                 logger.debug(".... FN Shunt_B_Enabled " + Shunt_B_Enabled)
-                
+
                 FNconfig_Shunt_C_Enabled = int(fndc_config[16])
                 Shunt_C_Enabled = decode_enum(FNconfig_Shunt_C_Enabled, get_sdc_values(blockResult["id"], "FNconfig_Shunt_C_Enabled"), "FNDC shunt C enabled")
                 logger.debug(".... FN Shunt_C_Enabled " + Shunt_C_Enabled)
@@ -1976,7 +1934,7 @@ def main():
                 if FNconfig_Relay_Control==2:
                     relay_mode="on"
                 logger.debug(".... FN Relay Mode " + str(FNconfig_Relay_Control) + " " + relay_mode)
-                
+
                 # FNDC data - JSON preparation
                 devices_array= {
                   "address"                              : address,
@@ -2022,7 +1980,7 @@ def main():
                     devices_array["shunt_c_role"] = shunt_role_list[2]
 
                 devices.append(devices_array)
-                                
+
                 # FNDC data - MariaDB SQL preparation
                 db_devices_values.append ((
                 date_sql,
@@ -2054,7 +2012,7 @@ def main():
                 Shunt_B_Enabled,
                 Shunt_C_Enabled,
                 fn_battery_temperature))
-                
+
                 db_devices_sql.append ("INSERT INTO monitormate_fndc (\
                 date,\
                 address,\
@@ -2086,7 +2044,7 @@ def main():
                 shunt_enabled_c,\
                 battery_temp) \
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)")
-                    
+
                 # FNDC data - MQTT data preparation topic:value
                 mqtt_devices.append ({
                      "outback/fndc/battery_voltage"       : fn_battery_voltage,
@@ -2127,12 +2085,12 @@ def main():
 
             client.close()
             client = None
-            mate_run = datetime.now()                                             
-            running_time = round ((mate_run - start_run).total_seconds(),3)       
+            mate_run = datetime.now()
+            running_time = round ((mate_run - start_run).total_seconds(),3)
             logger.debug(".. Mate connection closed")
 
             # MQTT discovery - publish Home Assistant device definitions once,
-            # immediately after the first complete Mate3 scan.
+            # immediately after the first complete MATE3 scan.
             if MQTT_active == 'true' and MQTT_discovery_active == 'true' and mqtt_discovery_done == False:
                 MQTT_auth = None
                 if len(MQTT_username) > 0:
@@ -2145,27 +2103,27 @@ def main():
                 logger.debug(".. HA devices discovery completed")
 
             print("---------------------------------------------------------------------------")
-            print(f"running time Mate:      {running_time:8.3f} sec")  
-  
+            print(f"running time Mate:      {running_time:8.3f} sec")
+
             break
-  
+
     # MariaDB upload
-    mariadb_run = datetime.now() 
+    mariadb_run = datetime.now()
     mydb = None
     mycursor = None
     try:
         if SQL_active=='true':
-            
+
             date_now=curent_date_time.strftime("%Y-%m-%d") #current date
             mydb = mariadb.connect(host=host,port=db_port,user=user,password=password,database=database)
-            
+
             # devices data - MariaDB upload
             n=0
             for value in db_devices_values:
                 mycursor = mydb.cursor()
                 mycursor.execute(db_devices_sql[n], value)
                 n = n+1
-            
+
             if not fndc_detected:
                 mydb.commit()
                 logger.debug(".. Summary of the day skipped - FNDC not detected")
@@ -2173,7 +2131,7 @@ def main():
                 # summary of the day calculation for MariaDB upload
                 sql="SELECT date,kwh_in,kwh_out,ah_in,max_soc,min_soc FROM monitormate_summary \
                 where date(date)= DATE(NOW())"
-            
+
                 mycursor = mydb.cursor()
                 mycursor.execute(sql)
                 myresult = mycursor.fetchall()
@@ -2194,12 +2152,12 @@ def main():
                     mycursor = mydb.cursor()
                     mycursor.execute(sql, val)
                     mydb.commit()
-                
+
             mycursor.close()
             mydb.close()
-            mariadb_run = datetime.now()                                             
-            running_time = round ((mariadb_run - mate_run).total_seconds(),3)        
-            print(f"running time MariaDB:   {running_time:8.3f} sec")     
+            mariadb_run = datetime.now()
+            running_time = round ((mariadb_run - mate_run).total_seconds(),3)
+            print(f"running time MariaDB:   {running_time:8.3f} sec")
 
     except Exception as e:
         mariadb_run = datetime.now()
@@ -2295,24 +2253,24 @@ def main():
         if key != "date":
             mqtt_devices[-1]["outback/summary/" + key] = value
 
-    #JSON serialisation and save
+    # JSON serialisation and save
     try:
         json_data={"time":time, "devices":devices, "summary":summary, "various":various}
         with open(os.path.join(output_path, 'mate_status.json'), 'w') as outfile:
             json.dump(json_data, outfile)
-        
+
         if duplicate_active == 'true':
-            #print(duplicate_active)
-            #shutil.copy(os.path.join(output_path, 'mate_status.json'), os.path.join(duplicate_path, 'mate_status.json'))      #copy the file in second location
+            # print(duplicate_active)
+            # shutil.copy(os.path.join(output_path, 'mate_status.json'), os.path.join(duplicate_path, 'mate_status.json'))      #copy the file in second location
             shutil.copy(os.path.join(output_path, 'mate_status.json'), os.path.join(duplicate_path, 'mate_status.json'))
-        json_run = datetime.now()                                                           
-        running_time = round ((json_run - mariadb_run).total_seconds(),3)                   
-        print(f"running time JSON:      {running_time:8.3f} sec")                
+        json_run = datetime.now()
+        running_time = round ((json_run - mariadb_run).total_seconds(),3)
+        print(f"running time JSON:      {running_time:8.3f} sec")
 
     except Exception as e:
         logger.exception("JSON read/write")
         json_run = datetime.now()
-        
+
     # MQTT system sensor - script uptime in days for Home Assistant.
     uptime = round((datetime.now() - script_start_time).total_seconds() / 86400, 3)
     mqtt_devices.append({
@@ -2322,7 +2280,7 @@ def main():
     # MQTT send data to MQTT broker
     try:
         if MQTT_active=='true':
-            MQTT_auth = None 
+            MQTT_auth = None
             if len(MQTT_username) > 0:
                 MQTT_auth = { 'username': MQTT_username, 'password': MQTT_password }
 
@@ -2331,21 +2289,29 @@ def main():
                 for topic, payload in mqtt_data.items():
                     messages.append((topic, payload, 0, True))  # QoS=0, retain=True
 
-            topic = "outback/mate" 
+            topic = "outback/mate"
             payload = json.dumps(json_data)
             messages.append((topic, payload, 0, True))
-            
+
             publish.multiple(messages, hostname=MQTT_broker, port=MQTT_port, auth=MQTT_auth)
 
-            # Only after the data is on the broker, so availability follows the
-            # readings rather than merely the script still being alive.
-            publish_availability(MQTT_payload_online)
-        
-        mqtt_run = datetime.now()                                                   
-        running_time = round ((mqtt_run - json_run).total_seconds(),3)              
+            if mate3_status != MQTT_payload_online:
+                if publish_mqtt_state(MQTT_status_topic, MQTT_payload_online):
+                    mate3_status = MQTT_payload_online
+                    logger.info(" MATE3 status: " + MQTT_payload_online)
+
+            if mqtt_availability_state != MQTT_payload_online:
+                if publish_mqtt_state(MQTT_availability_topic, MQTT_payload_online):
+                    mqtt_availability_state = MQTT_payload_online
+                    logger.info(" MQTT availability: " + MQTT_payload_online)
+
+            mate3_failed_cycles = 0
+
+        mqtt_run = datetime.now()
+        running_time = round ((mqtt_run - json_run).total_seconds(),3)
         print(f"running time MQTT:      {running_time:8.3f} sec")
-        
-        # script uptime 
+
+        # script uptime
         uptime = round((datetime.now() - script_start_time).total_seconds() / 86400, 3)
         print(f"script uptime:          {uptime:8.3f} day")
 
@@ -2372,7 +2338,10 @@ if daemon_active == 'true':
             main()
         except Exception:
             logger.exception("Main loop error")
-            publish_availability(MQTT_payload_offline)
+            if mate3_status != MQTT_payload_offline:
+                if publish_mqtt_state(MQTT_status_topic, MQTT_payload_offline):
+                    mate3_status = MQTT_payload_offline
+                    logger.info(" MATE3 status: " + MQTT_payload_offline)
             close_mate3_safely()
 
         tm.sleep(scan_frequency)
@@ -2383,5 +2352,8 @@ else:
             logger.critical("Single run failed")
     except Exception:
         logger.exception("Main loop error")
-        publish_availability(MQTT_payload_offline)
+        if mate3_status != MQTT_payload_offline:
+            if publish_mqtt_state(MQTT_status_topic, MQTT_payload_offline):
+                mate3_status = MQTT_payload_offline
+                logger.info(" MATE3 status: " + MQTT_payload_offline)
         close_mate3_safely()
