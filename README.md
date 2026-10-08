@@ -40,11 +40,11 @@ This integration is based on:
 ### CLI usage
 Force a single execution in run-once mode with temporary `config.cfg` overrides:
 ```
-python ReadMateStatusModbus.py daemon_active=false
+python ReadMateStatusModBus.py daemon_active=false
 ```
 * Supports multiple `key=value` arguments (e.g. `MQTT_active=false`, `MQTT_discovery_active=false`)
 ```
-python ReadMateStatusModbus.py MQTT_active=false MQTT_discovery_active=false
+python ReadMateStatusModBus.py MQTT_active=false MQTT_discovery_active=false
 ```
 * Allows only enabling/disabling features (MQTT, JSON, SQL); see the whitelist of valid CLI parameters
 * Any valid CLI parameter automatically forces run-once mode; therefore, `daemon_active=true` from CLI is ignored
@@ -116,17 +116,30 @@ MQTT_discovery_active = true
 
 #### Availability when the MATE3 stops answering
 
-Sensor values are published with the **retain** flag and carry no timestamp, so if the MATE3 becomes unreachable the broker keeps serving the last readings and Home Assistant shows them as current - indefinitely, and with nothing to indicate the data is hours or months old. Losing SunSpec on the MATE3, a network change, or a device that has simply stopped responding all look identical to a working system whose values happen not to have moved.
+Home Assistant sensors use retained MQTT values, which means they may continue displaying their last readings even when communication with the MATE3 is lost.
 
-The script therefore publishes its own availability, retained, on:
+Starting with **ReadMateStatusModBus v1.5.1**, sensor availability is managed automatically through two separate MQTT topics:
 
+```text
+outback/status          MATE3 communication status
+outback/availability    Home Assistant sensor availability
 ```
-outback/status        online | offline
+
+MQTT Auto Discovery automatically configures Home Assistant sensors to use `outback/availability`, so no manual sensor configuration is required.
+
+In the `[MQTT]` section of `config.cfg`, you can configure:
+
+```ini
+MQTT_availability_threshold = 10
 ```
 
-`offline` is published when a scan cannot reach the MATE3, `online` once a scan's data has actually reached the broker, and only when the state changes rather than on every scan. Discovery configs carry `avty_t`, so entities created by MQTT Auto Discovery pick this up with no manual configuration and show as unavailable rather than stale.
+In **daemon mode**, this example marks Home Assistant sensors as unavailable after **10 consecutive failed MATE3 communication cycles**. A successful cycle resets the failure counter. With a 60-second scan interval, this corresponds to approximately 10 minutes of consecutive failures. This helps prevent brief communication interruptions from marking sensors as unavailable. The value `10` is an example, not the script default.
 
-A last will is not used, and would not help: messages are sent with `publish.single()`, which disconnects cleanly after each one so the broker discards any will, and in the usual case the script is running perfectly well - it is the MATE3 that has gone away. If the script itself stops, the last retained value on `outback/status` stays as it was, so supervise the process separately if that matters to you.
+In **single-run mode**, availability is updated immediately based on the result of each execution, regardless of this setting.
+
+Sensors become available again after successful communication with the MATE3 and MQTT data publishing.
+
+**Note:** Availability reflects communication with the MATE3, not whether the ReadMate script itself is running. If the script stops unexpectedly, the last retained availability state remains unchanged.
 
 #### Removing entities that are no longer published
 Discovery configs and sensor values are published to MQTT with the **retain** flag, and the topics are one per sensor. When your configuration changes, the script publishes the topics that now apply - it does not publish to the topics that no longer apply, and nothing overwrites them. The broker keeps serving those old retained messages, including across a broker restart, so Home Assistant recreates the entity every time it subscribes and shows its last value indefinitely. Deleting the device in Home Assistant does not help, because the retained config brings it straight back.
