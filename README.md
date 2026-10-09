@@ -19,13 +19,85 @@ Devices are detected automatically from the SunSpec blocks the MATE3 reports - n
 FX/VFX and Radian inverters publish the same JSON fields and MQTT topics, so Home Assistant automations are portable between the two families.
 
 ---
+# Installation
+
+### Requirements
+
+- A compatible OutBack Power system connected to a MATE3/MATE3S with Modbus TCP enabled.
+- Python 3 installed on the computer running the scripts.
+- Network access to the MATE3/MATE3S.
+- An MQTT broker for MQTT publishing and Home Assistant integration.
+- MariaDB (optional, for database storage).
+
+### Setup
+
+**1. Download the repository**
+
+Download or clone the repository to your computer.
+
+**2. Install Python dependencies**
+
+Open a terminal in the project directory and run:
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+**3. Configure the MATE3/MATE3S connection**
+
+Edit `config.cfg` and configure your MATE3/MATE3S IP address:
+
+```ini
+[MATE3 connection]
+mate3_ip = 192.168.0.150
+mate3_modbus = 502
+```
+
+Replace the example IP address with your device's actual address.
+
+**4. Configure MQTT (optional)**
+
+To enable MQTT publishing and Home Assistant MQTT Auto Discovery, configure the `[MQTT]` section of `config.cfg` with your broker address, port, and credentials.
+
+```ini
+MQTT_active = true
+MQTT_discovery_active = true
+```
+
+For Home Assistant sensor availability, see [Availability when the MATE3 stops answering](#availability-when-the-mate3-stops-answering).
+
+**5. Configure the execution mode**
+
+ReadMateStatusModBus supports continuous operation (**daemon mode**) or single execution (**run-once mode**).
+
+Configure the desired mode in the `[General]` section of `config.cfg`:
+
+```ini
+daemon_active = true
+scan_frequency = 60
+```
+
+Set `daemon_active = false` to run the script once.
+
+**6. Run ReadMateStatusModBus**
+
+From the project directory, execute:
+
+```bash
+python ReadMateStatusModBus.py
+```
+
+Check the script output to confirm successful communication with the MATE3/MATE3S.
+
+If MQTT Auto Discovery is enabled, the detected devices and sensors should appear automatically in Home Assistant.
+
+---
 # How Does This Software Work?
 This integration is based on:
 - `ReadMateStatusModBus.py` (RMS) for reading MATE3/MATE3S
 - `ChangeMateStatusModBus.py` (CMS) for writing data
 - `sdc.py` (SDC - SunSpec Data Configuration), a shared Single Source of Truth based on the OutBack AXS application note, used by both RMS and CMS for SunSpec block, register, datatype, access, scale factor, enum, and bitfield definitions
 
-- An MQTT broker must be installed (MQTT documentation is outside the scope of this project).
 - RMS creates a JSON file with almost all useful parameters extracted from MATE3/MATE3S and pushes MQTT data for selected parameters. More functionalities of RMS can be configured in the config file (`config.cfg`).
 - MQTT Auto Discovery for Home Assistant devices/sensors is implemented as of v3.0.0. Manual configuration of MQTT sensors in YAML or using the JSON file remains valid options.
 - CMS uses the shared SDC definitions to validate and write supported parameters to MATE3/MATE3S.
