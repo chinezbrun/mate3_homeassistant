@@ -13,7 +13,7 @@ import sys, os
 import re
 from sdc import SDC_BLOCKS  # SDC (SunSpec Data Configuration)
 
-script_ver = "1.5.1_20261007"
+script_ver = "1.5.2_20261031"
 print("script version: " + script_ver)
 
 pathname               = os.path.dirname(sys.argv[0])
@@ -817,12 +817,12 @@ def publish_mqtt_discovery(detected_devices, MQTT_auth):
     display_name = "Outback System"
     model        = "System"
 
-    names        = ["uptime"]
-    ids          = ["uptime"]
-    topics       = ["outback/system/uptime"]
-    dev_cla      = [None]
-    stat_cla     = ["measurement"]
-    unit_of_meas = ["d"]
+    names        = ["uptime", "Mate Status"]
+    ids          = ["uptime", "mate_status"]
+    topics       = ["outback/system/uptime", MQTT_status_topic]
+    dev_cla      = [None, None]
+    stat_cla     = ["measurement", None]
+    unit_of_meas = ["d", None]
 
     for n in range(len(ids)):
 
@@ -842,7 +842,7 @@ def publish_mqtt_discovery(detected_devices, MQTT_auth):
         if unit_of_meas[n] is not None:
             msg["unit_of_meas"] = unit_of_meas[n]
 
-        msg["avty_t"] = MQTT_availability_topic
+        # System sensors remain available independently of MATE3 communication.
 
         msg["dev"] = {
             "identifiers"  : [dev_name],
@@ -860,6 +860,10 @@ def publish_mqtt_discovery(detected_devices, MQTT_auth):
 # Read the detected SunSpec blocks and build the current system data.
 def main():
     global mqtt_discovery_done, client, startReg, mate3_status, mqtt_availability_state, mate3_failed_cycles
+
+    # Publish script uptime on every scan, even when MATE3 is offline.
+    uptime = round((datetime.now() - script_start_time).total_seconds() / 86400, 3)
+    publish_mqtt_state("outback/system/uptime", uptime)
 
     if connect_mate3() == False:
         if mate3_status != MQTT_payload_offline:
@@ -2270,12 +2274,6 @@ def main():
     except Exception as e:
         logger.exception("JSON read/write")
         json_run = datetime.now()
-
-    # MQTT system sensor - script uptime in days for Home Assistant.
-    uptime = round((datetime.now() - script_start_time).total_seconds() / 86400, 3)
-    mqtt_devices.append({
-        "outback/system/uptime": uptime
-        })
 
     # MQTT send data to MQTT broker
     try:
