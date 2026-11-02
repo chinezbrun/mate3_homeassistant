@@ -104,6 +104,10 @@ ReadMateStatus version history:
                  - new: configurable availability failure threshold in daemon mode
                  - new: immediate status and availability update in single-run mode
                  - improvement: comments and logging cleanup
+
+1.5.2_20261031   - fix: Uptime sensor remains available and continues updating when MATE3 is offline (closes #14)
+                 - new: Mate Status sensor under Outback System in Home Assistant MQTT Discovery
+
 -----------------------------------
 ChangeMateStatus version history:
 =====================================
